@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write   # needed to attach binaries to the GitHub release
+
 jobs:
   build:
     strategy:
