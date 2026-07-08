@@ -1,5 +1,9 @@
 # DockLens
 
+![DockLens](docklens/assets/docklens_logo.png)
+
+*Visual Intermolecular Interaction Analytics*
+
 Standalone desktop tool (PyQt5) that detects non-covalent intermolecular
 interactions in docking poses (`.mol2`, `.pdb`, `.pdbqt`), separates receptor
 from ligand automatically, and shows the results in sortable/filterable tables
@@ -8,6 +12,8 @@ exportable to CSV / XLSX.
 The geometric detection core (`interaction_core.py`) is **ported verbatim** from
 the PyMOL plugin `interactions_plugin.py` — same cutoffs, same geometry — so
 results are cross-checkable between the two tools. It has **no PyMOL dependency**.
+
+**Inventor:** Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
 
 ## Interaction types (12)
 
@@ -48,12 +54,32 @@ pyinstaller --noconfirm --onefile --windowed --name DockLens run_docklens.py
 ## Using the app
 
 1. **Open file(s)** or **Open folder** (recursive scan of `.mol2/.pdb/.pdbqt`).
-2. (optional) type key residues, e.g. `ASP32 LYS36 SER70`.
-3. **Run detection**.
-4. Sort by clicking a column; filter by interaction type, search text, or
+2. (optional) set key residues — type them (`ASP32 LYS36 SER70`) **or** tick them
+   from the checkbox list of the detected protein residues (both stay in sync).
+3. Pick the **H-bond criteria** preset (see below).
+4. **Run detection**.
+5. Sort by clicking a column; filter by interaction type, search text, or
    "key residues only". Edit key residues any time — counts recompute without
    re-running detection.
-5. **Export CSV** (two files) or **Export XLSX** (two sheets, type-coloured).
+6. **Export CSV** (two files) or **Export XLSX** (two sheets, type-coloured).
+7. **Reset** clears everything to start a new analysis.
+
+## H-bond criteria — DockLens vs. Discovery Studio
+
+DockLens ships two H-bond presets (does not change any other cutoff):
+
+| Preset | Donor···Acceptor | Angle | Result on the FDSVH test pose |
+|--------|------------------|-------|-------------------------------|
+| **PLIP** (default) | ≤ 4.1 Å | ≥ 100° | 22 H-bonds |
+| **Discovery Studio-like** | ≤ 3.5 Å | ≥ 120° | 5 H-bonds |
+
+The default (PLIP) is **deliberately permissive** — it matches the companion
+PyMOL plugin so numbers cross-check. Discovery Studio Visualizer uses a stricter
+definition (H···A ≈ ≤ 2.5 Å, i.e. D···A ≈ 3.2–3.5 Å, angle ≥ 120°), so it reports
+far fewer H-bonds. On the FDSVH pose, 11 of our 22 PLIP H-bonds sit at 3.5–4.0 Å
+and 4 above 4.0 Å — genuine but weak/long contacts that DSV does not count. This
+is a **definitional difference, not a bug**; use the *Discovery Studio-like*
+preset when you want counts aligned with DSV.
 
 ## Ligand vs. receptor resolution (fixed priority)
 

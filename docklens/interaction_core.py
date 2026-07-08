@@ -97,6 +97,36 @@ CUTOFFS = {
 
 _CUTOFF_DEFAULTS = dict(CUTOFFS)
 
+# H-bond criteria presets. 'plip' = shipped defaults (permissive, matches the
+# PyMOL plugin). 'dsv' = Discovery-Studio-like (stricter distance/angle) so the
+# H-bond count lines up with Discovery Studio Visualizer. Only the H-bond and
+# carbon-H-bond distance/angle keys are affected; all other cutoffs are untouched.
+HBOND_PRESETS = {
+    "plip": {
+        "hbond_dist": _CUTOFF_DEFAULTS["hbond_dist"],
+        "hbond_angle": _CUTOFF_DEFAULTS["hbond_angle"],
+        "carbon_hbond_dist": _CUTOFF_DEFAULTS["carbon_hbond_dist"],
+        "carbon_hbond_angle": _CUTOFF_DEFAULTS["carbon_hbond_angle"],
+    },
+    "dsv": {
+        "hbond_dist": 3.5,
+        "hbond_angle": 120.0,
+        "carbon_hbond_dist": 3.5,
+        "carbon_hbond_angle": 120.0,
+    },
+}
+
+
+def apply_hbond_preset(name):
+    """Switch the H-bond distance/angle cutoffs to a named preset in-place.
+
+    Does NOT alter any non-H-bond cutoff. Unknown names are ignored.
+    """
+    preset = HBOND_PRESETS.get(str(name).lower())
+    if preset:
+        CUTOFFS.update(preset)
+
+
 VALID_TYPES = list(INTERACTION_COLORS.keys())
 
 # Planarity tolerance for aromatic-ring perception (Angstrom). Verbatim.

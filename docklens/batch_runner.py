@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from .entity_resolver import resolve, resolve_manual, set_sides
 from .interaction_core import (
     VALID_TYPES,
+    apply_hbond_preset,
     compute_interactions,
     endpoint_name,
     endpoint_resid,
@@ -73,6 +74,7 @@ class RunResult:
     summaries: list = field(default_factory=list)
     pending: list = field(default_factory=list)  # needs confirmation
     key_residues: set = field(default_factory=set)
+    receptor_residues: set = field(default_factory=set)  # all detected protein residues
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +175,12 @@ def _summarize(ligand_id, source_file, sol, pose_no, score, details, key_set):
 
 
 def run(
-    paths, types=None, key_residues=None, confirm_fallback=False, manual_overrides=None
+    paths,
+    types=None,
+    key_residues=None,
+    confirm_fallback=False,
+    manual_overrides=None,
+    hbond_preset="plip",
 ):
     """Run detection over the given inputs.
 
@@ -182,7 +189,10 @@ def run(
     confirm_fallback if True, fallback resolutions are run anyway (headless);
                      if False, they are collected in RunResult.pending instead.
     manual_overrides {source_file: set_of_ligand_serials} to force a split.
+    hbond_preset     'plip' (default, permissive) or 'dsv' (Discovery-Studio-like,
+                     stricter H-bond distance/angle).
     """
+    apply_hbond_preset(hbond_preset)
     key_set = normalize_key_residues(key_residues or [])
     manual_overrides = manual_overrides or {}
     result = RunResult(key_residues=key_set)
@@ -208,6 +218,7 @@ def run(
                 if not res.ligand_atoms:
                     continue
                 set_sides(res)
+                result.receptor_residues.update(a.res_tag() for a in res.receptor_atoms)
                 inters = compute_interactions(
                     res.receptor_atoms, res.ligand_atoms, res.waters, types
                 )

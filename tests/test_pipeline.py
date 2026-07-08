@@ -121,6 +121,20 @@ def test_pdbqt_synthetic_score():
     assert poses[0].atoms[0].elem == "N"
 
 
+def test_hbond_preset():
+    plip = br.run([MOL2_A], hbond_preset="plip")
+    dsv = br.run([MOL2_A], hbond_preset="dsv")
+    n_plip = plip.summaries[0].counts["hbond"]
+    n_dsv = dsv.summaries[0].counts["hbond"]
+    assert n_plip == 22, n_plip
+    assert n_dsv < n_plip and n_dsv <= 8, (n_plip, n_dsv)
+    # cutoffs restored to defaults after a plip run (no leak)
+    from docklens.interaction_core import CUTOFFS, _CUTOFF_DEFAULTS
+
+    br.run([MOL2_A], hbond_preset="plip")
+    assert CUTOFFS["hbond_dist"] == _CUTOFF_DEFAULTS["hbond_dist"]
+
+
 if __name__ == "__main__":
     test_mol2_acceptance()
     print("mol2 acceptance OK")
@@ -132,4 +146,6 @@ if __name__ == "__main__":
     print("pdb synthetic OK")
     test_pdbqt_synthetic_score()
     print("pdbqt synthetic OK")
+    test_hbond_preset()
+    print("hbond preset OK")
     print("\nALL PIPELINE TESTS PASSED")

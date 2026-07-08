@@ -18,9 +18,13 @@ jobs:
           - os: windows-latest
             asset: DockLens-windows-x86_64.exe
             binary: dist/DockLens.exe
+            sep: ";"
+            icon: docklens/assets/docklens.ico
           - os: ubuntu-latest
             asset: DockLens-linux-x86_64
             binary: dist/DockLens
+            sep: ":"
+            icon: docklens/assets/docklens_icon.png
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -48,6 +52,8 @@ jobs:
       - name: Build with PyInstaller
         run: >
           pyinstaller --noconfirm --onefile --windowed --name DockLens
+          --icon "${{ matrix.icon }}"
+          --add-data "docklens/assets${{ matrix.sep }}docklens/assets"
           --exclude-module scipy --exclude-module rdkit
           --exclude-module matplotlib --exclude-module tkinter
           --exclude-module IPython --exclude-module pytest
