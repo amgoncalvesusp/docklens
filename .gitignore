@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# PyInstaller build output (executables ship via GitHub Releases, not git)
+build/
+dist/
+*.spec
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Editor / agent / OS
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
