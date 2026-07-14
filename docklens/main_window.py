@@ -18,12 +18,10 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from . import __version__, batch_runner as br
 from . import export
-from .entity_resolver import set_sides
 from .interaction_core import (
     INTERACTION_COLORS,
     VALID_TYPES,
     color_hex,
-    compute_interactions,
 )
 
 INVENTOR = "Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA)"
@@ -358,20 +356,36 @@ class MainWindow(QtWidgets.QMainWindow):
             key_residues=self.key_edit.text(),
             hbond_preset=self._hbond_preset(),
         )
-        if result.pending and not self._confirm_pending(result):
-            self.status.showMessage("Run cancelled at ligand/receptor confirmation.")
-            return
+        if result.pending:
+            if not self._confirm_pending(result):
+                self.status.showMessage("Run cancelled at ligand/receptor confirmation.")
+                return
+            result = br.run(
+                self._files,
+                key_residues=self.key_edit.text(),
+                confirm_fallback=True,
+                hbond_preset=self._hbond_preset(),
+            )
         self._result = result
         self._populate_residue_list()
         self._refresh_tables()
+        errors = sum(record.status == "error" for record in result.input_qc)
         self.status.showMessage(
-            "%d ligand/pose row(s), %d interaction(s) [%s]."
+            "%d ligand/pose row(s), %d interaction(s), %d error(s) [%s]."
             % (
                 len(result.summaries),
                 len(result.details),
+                errors,
                 self.preset_combo.currentText(),
             )
         )
+        if errors:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Completed with errors",
+                "%d input file(s) could not be processed. Details will be included "
+                "in the Input QC export sheet." % errors,
+            )
 
     def _confirm_pending(self, result):
         previews = "\n\n".join(
@@ -391,37 +405,6 @@ class MainWindow(QtWidgets.QMainWindow):
         box.exec_()
         if box.clickedButton() is not confirm:
             return False
-        key_set = br.normalize_key_residues(self.key_edit.text())
-        for pend in result.pending:
-            res = pend.resolution
-            if not res.ligand_atoms:
-                continue
-            set_sides(res)
-            result.receptor_residues.update(a.res_tag() for a in res.receptor_atoms)
-            inters = compute_interactions(
-                res.receptor_atoms,
-                res.ligand_atoms,
-                res.waters,
-                self._selected_types(),
-            )
-            details = [
-                br._detail_from_interaction(
-                    it, res.ligand_id, pend.source_file, key_set
-                )
-                for it in inters
-            ]
-            summ = br._summarize(
-                res.ligand_id,
-                pend.source_file,
-                pend.pose.sol,
-                pend.pose.pose_index + 1,
-                pend.pose.score,
-                details,
-                key_set,
-            )
-            result.details.extend(details)
-            result.summaries.append(summ)
-        result.pending = []
         return True
 
     def _refresh_tables(self):
@@ -430,8 +413,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.summary_model.set_dataframe(export.summary_dataframe(self._result))
         self.detail_model.set_dataframe(export.detail_dataframe(self._result))
         self._apply_filters()
-        self.summary_view.resizeColumnsToContents()
-        self.detail_view.resizeColumnsToContents()
+        if len(self._result.details) < 500:
+            self.summary_view.resizeColumnsToContents()
+            self.detail_view.resizeColumnsToContents()
 
     # ---- key residues: text field <-> checkbox list stay in sync ----
     def _populate_residue_list(self):
@@ -476,7 +460,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _recompute_key(self):
         if self._result is None:
             return
-        br.recompute_key(self._result, self.key_edit.text())
+        self._result = br.recompute_key(self._result, self.key_edit.text())
         self._refresh_tables()
 
     def _filter_residue_list(self, text):
@@ -524,7 +508,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not prefix:
             return
-        paths = export.export_csv(self._result, prefix)
+        export_filter = self._choose_export_filter(include_matrix_mode=False)
+        if export_filter is None:
+            return
+        try:
+            paths = export.export_csv(self._result, prefix, export_filter)
+        except Exception as exc:  # noqa: BLE001 - present a safe UI error
+            QtWidgets.QMessageBox.critical(self, "Export failed", str(exc))
+            return
         QtWidgets.QMessageBox.information(
             self, "Exported", "Wrote:\n" + "\n".join(paths)
         )
@@ -537,11 +528,57 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not path:
             return
-        out = export.export_xlsx(self._result, path)
+        export_filter = self._choose_export_filter(include_matrix_mode=True)
+        if export_filter is None:
+            return
+        try:
+            out = export.export_xlsx(self._result, path, export_filter)
+        except Exception as exc:  # noqa: BLE001 - present a safe UI error
+            QtWidgets.QMessageBox.critical(self, "Export failed", str(exc))
+            return
         QtWidgets.QMessageBox.information(self, "Exported", "Wrote:\n" + out)
 
+    def _choose_export_filter(self, include_matrix_mode):
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Export scope")
+        box.setText("Choose which results to export.")
+        all_button = box.addButton("All results", QtWidgets.QMessageBox.AcceptRole)
+        filtered_button = box.addButton(
+            "Filtered interactions (all poses)", QtWidgets.QMessageBox.ActionRole
+        )
+        box.addButton(QtWidgets.QMessageBox.Cancel)
+        box.exec_()
+        clicked = box.clickedButton()
+        if clicked not in (all_button, filtered_button):
+            return None
+        scope = "filtered" if clicked is filtered_button else "all"
+        matrix_mode = "count"
+        if include_matrix_mode:
+            label, accepted = QtWidgets.QInputDialog.getItem(
+                self,
+                "Residue Matrix",
+                "Cell values:",
+                ["Count", "Presence (0/1)"],
+                0,
+                False,
+            )
+            if not accepted:
+                return None
+            matrix_mode = "presence" if label.startswith("Presence") else "count"
+        return br.ExportFilter(
+            scope=scope,
+            interaction_types=(
+                frozenset(self._selected_types()) if scope == "filtered" else None
+            ),
+            text=self.search_edit.text() if scope == "filtered" else "",
+            key_only=(self.key_only_cb.isChecked() if scope == "filtered" else False),
+            matrix_mode=matrix_mode,
+        )
+
     def _require_result(self):
-        if self._result is None or not self._result.summaries:
+        if self._result is None or (
+            not self._result.summaries and not self._result.input_qc
+        ):
             QtWidgets.QMessageBox.warning(
                 self, "Nothing to export", "Run detection first."
             )

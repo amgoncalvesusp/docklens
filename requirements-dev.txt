@@ -1,0 +1,6 @@
+pytest==8.3.5
+pytest-cov==6.0.0
+pytest-qt==4.4.0
+ruff==0.9.10
+pip-audit==2.7.3
+pyinstaller==6.12.0

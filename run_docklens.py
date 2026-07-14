@@ -2,7 +2,7 @@
 
 import sys
 
-from docklens.main_window import launch
+from docklens.app import main
 
 if __name__ == "__main__":
-    sys.exit(launch())
+    sys.exit(main())

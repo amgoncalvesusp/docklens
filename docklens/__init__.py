@@ -6,4 +6,4 @@ Core detection logic is ported from the PyMOL plugin ``interactions_plugin.py``
 Inventor: Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
