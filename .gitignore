@@ -12,6 +12,14 @@ dist/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+
+# Local example exports (may contain research data)
+/interactions.xlsx
+/interaction_peptide_kpc_docking.xlsx
 
 # Editor / agent / OS
 .claude/

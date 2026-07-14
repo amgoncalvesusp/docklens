@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import sys
 
-from .main_window import launch
-
 
 def main():
+    if "--self-check" in sys.argv:
+        from .self_check import run_self_check
+
+        return run_self_check()
+    from .main_window import launch
+
     return launch()
 
 

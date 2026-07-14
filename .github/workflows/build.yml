@@ -7,49 +7,72 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed to attach binaries to the GitHub release
+  contents: read
+
+concurrency:
+  group: docklens-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Validate tag and application version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "v$(python -c 'from docklens import __version__; print(__version__)')"
+      - name: Lint
+        run: ruff check docklens tests run_docklens.py
+      - name: Test with coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest --cov=docklens --cov-branch --cov-report=term-missing --cov-fail-under=80
+      - name: Audit runtime dependencies
+        run: pip-audit -r requirements.txt
+
   build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             asset: DockLens-windows-x86_64.exe
             binary: dist/DockLens.exe
             sep: ";"
             icon: docklens/assets/docklens.ico
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             asset: DockLens-linux-x86_64
             binary: dist/DockLens
             sep: ":"
             icon: docklens/assets/docklens_icon.png
     runs-on: ${{ matrix.os }}
-
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
-
-      - name: Install Linux Qt/xcb runtime libs (for PyInstaller bundling)
+          cache: pip
+      - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb-xinerama0 libxcb-cursor0 libegl1
-
+          sudo apt-get install -y \
+            libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xkb1
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
-
-      - name: Run backend tests
-        run: python tests/test_pipeline.py
-        continue-on-error: true
-
-      - name: Build with PyInstaller
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Build executable
         run: >
           pyinstaller --noconfirm --onefile --windowed --name DockLens
           --icon "${{ matrix.icon }}"
@@ -58,21 +81,69 @@ jobs:
           --exclude-module matplotlib --exclude-module tkinter
           --exclude-module IPython --exclude-module pytest
           run_docklens.py
-
-      - name: Rename artifact
+      - name: Collect artifact
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p out
           cp "${{ matrix.binary }}" "out/${{ matrix.asset }}"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+          test -s "out/${{ matrix.asset }}"
+      - name: Smoke test Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $process = Start-Process `
+            -FilePath ".\out\${{ matrix.asset }}" `
+            -ArgumentList "--self-check" `
+            -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) {
+            throw "DockLens self-check failed: $($process.ExitCode)"
+          }
+      - name: Smoke test Linux executable
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          chmod +x "out/${{ matrix.asset }}"
+          "./out/${{ matrix.asset }}" --self-check
+          file "out/${{ matrix.asset }}" | grep -q ELF
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.asset }}
           path: out/${{ matrix.asset }}
+          if-no-files-found: error
 
-      - name: Attach to release (on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          files: out/${{ matrix.asset }}
+          path: release
+          merge-multiple: true
+      - name: Validate release assets and checksums
+        run: |
+          set -euo pipefail
+          test -s release/DockLens-windows-x86_64.exe
+          test -s release/DockLens-linux-x86_64
+          chmod +x release/DockLens-linux-x86_64
+          file release/DockLens-windows-x86_64.exe | grep -Eiq 'PE32|MS-DOS'
+          file release/DockLens-linux-x86_64 | grep -q ELF
+          (cd release && sha256sum DockLens-windows-x86_64.exe DockLens-linux-x86_64 > SHA256SUMS.txt)
+      - name: Publish verified release
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag --draft --generate-notes \
+            --title "DockLens ${GITHUB_REF_NAME}" \
+            release/DockLens-windows-x86_64.exe \
+            release/DockLens-linux-x86_64 \
+            release/SHA256SUMS.txt
+          test "$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets | length')" -eq 3
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest

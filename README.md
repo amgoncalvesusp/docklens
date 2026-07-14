@@ -61,7 +61,10 @@ pyinstaller --noconfirm --onefile --windowed --name DockLens run_docklens.py
 5. Sort by clicking a column; filter by interaction type, search text, or
    "key residues only". Edit key residues any time — counts recompute without
    re-running detection.
-6. **Export CSV** (two files) or **Export XLSX** (two sheets, type-coloured).
+6. **Export CSV** or **Export XLSX**. Choose all interactions or the current
+   filtered interactions; every analyzed pose remains in Summary/Matrix, with
+   zero counts when no interaction survives the filter. XLSX matrices can use
+   interaction counts or binary presence values.
 7. **Reset** clears everything to start a new analysis.
 
 ## H-bond criteria — DockLens vs. Discovery Studio
@@ -90,6 +93,31 @@ preset when you want counts aligned with DSV.
    confirmation** (never applied silently).
 5. Manual override always available.
 
+## XLSX export schema (v0.3)
+
+DockLens 0.3 exports a versioned, five-sheet workbook:
+
+| Sheet | Contents |
+|-------|----------|
+| `Summary` | One row per unambiguous pose, with totals and per-type counts. |
+| `Residue Matrix` | One row per pose and grouped columns for residue × interaction type. |
+| `Detail` | Auditable interaction endpoints, pose IDs, atom serials and geometry. |
+| `Parameters` | DockLens/schema version, preset, effective cutoffs and export filters. |
+| `Input QC` | Status, resolution method, atom counts, warnings and parse errors. |
+
+The matrix uses full residue identifiers such as `SER70A`, so chains do not
+collide. **Count** mode stores the number of interactions; **Presence** mode
+stores only `0` or `1`. `Detail` is the canonical source of truth from which the
+matrix and filtered summaries are derived.
+
+Each source receives a deterministic `source_id`; every pose/resolution receives
+a unique `pose_id`. Water bridges are represented as one semantic
+receptor-water-ligand interaction and therefore count once.
+
+CSV retains the compatible `<prefix>_summary.csv` and `<prefix>_detail.csv`
+names. Text controlled by input files is neutralized before CSV/XLSX writing so
+it cannot become an Excel formula.
+
 ## Modules
 
 | File | Role |
@@ -99,14 +127,19 @@ preset when you want counts aligned with DSV.
 | `parser_mol2.py` / `parser_pdb.py` / `parser_pdbqt.py` | Format readers. |
 | `entity_resolver.py` | Ligand/receptor split (priority above). |
 | `batch_runner.py` | Input modes, detection driver, Summary/Detail rows, key-residue recompute. |
-| `export.py` | CSV / XLSX writers with Okabe-Ito shading. |
+| `results.py` | Immutable schema-v2 result, endpoint, QC and parameter contracts. |
+| `export_views.py` | Pure Summary/Detail/Residue Matrix/Parameters/QC transformations. |
+| `export.py` | Atomic CSV / XLSX writers with filtering and Okabe-Ito shading. |
 | `main_window.py` / `app.py` | PyQt5 UI + entry point. |
 
 ## Tests
 
 ```
-python tests/test_pipeline.py
+pip install -r requirements-dev.txt
+pytest --cov=docklens --cov-branch --cov-fail-under=80
 ```
 
-Covers the two attached mol2 acceptance cases, synthetic PDB/PDBQT, key-residue
-recompute and CSV/XLSX export.
+Tests use repository-owned synthetic PDB/PDBQT/MOL2 fixtures and cover parsing,
+pose identity, immutable key-residue recomputation, water bridges, filtered
+exports, formula neutralization, the five-sheet XLSX schema and offscreen UI
+flows. No test depends on files outside the repository.

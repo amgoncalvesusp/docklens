@@ -18,6 +18,9 @@ Results are therefore checkable against the PyMOL plugin.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+from types import MappingProxyType
+
 import numpy as np
 
 # ===========================================================================
@@ -125,6 +128,22 @@ def apply_hbond_preset(name):
     preset = HBOND_PRESETS.get(str(name).lower())
     if preset:
         CUTOFFS.update(preset)
+
+
+def cutoffs_for_preset(name):
+    """Return an immutable cutoff snapshot without mutating process globals."""
+    values = dict(_CUTOFF_DEFAULTS)
+    values.update(HBOND_PRESETS.get(str(name).lower(), HBOND_PRESETS["plip"]))
+    return MappingProxyType(values)
+
+
+_ACTIVE_CUTOFFS = ContextVar(
+    "docklens_active_cutoffs", default=MappingProxyType(dict(CUTOFFS))
+)
+
+
+def _active_cutoffs():
+    return _ACTIVE_CUTOFFS.get()
 
 
 VALID_TYPES = list(INTERACTION_COLORS.keys())
@@ -432,8 +451,20 @@ def classify(atoms, rings, has_h):
 # ===========================================================================
 
 
-def _mk(itype, subtype, a_label, b_label, a_point, b_point, a_obj, b_obj):
-    return {
+def _mk(
+    itype,
+    subtype,
+    a_label,
+    b_label,
+    a_point,
+    b_point,
+    a_obj,
+    b_obj,
+    a_role="",
+    b_role="",
+    **extra
+):
+    record = {
         "type": itype,
         "subtype": subtype,
         "a_label": a_label,
@@ -442,7 +473,11 @@ def _mk(itype, subtype, a_label, b_label, a_point, b_point, a_obj, b_obj):
         "b_point": b_point,
         "a_obj": a_obj,
         "b_obj": b_obj,
+        "a_role": a_role,
+        "b_role": b_role,
     }
+    record.update(extra)
+    return record
 
 
 def _hbond_pairs(feat_a, feat_b, itype, dist_cut, angle_cut, has_h):
@@ -469,20 +504,22 @@ def _hbond_pairs(feat_a, feat_b, itype, dist_cut, angle_cut, has_h):
                     acc.coord,
                     donor,
                     acc,
+                    "donor",
+                    "acceptor",
                 )
             )
     return out
 
 
 def detect_hbond(fa, fb, has_h):
-    c = CUTOFFS
+    c = _active_cutoffs()
     res = _hbond_pairs(fa, fb, "hbond", c["hbond_dist"], c["hbond_angle"], has_h)
     res += _hbond_pairs(fb, fa, "hbond", c["hbond_dist"], c["hbond_angle"], has_h)
     return res
 
 
 def detect_carbon_hbond(fa, fb, has_h):
-    c = CUTOFFS
+    c = _active_cutoffs()
     res = _hbond_pairs(
         fa, fb, "carbon_hbond", c["carbon_hbond_dist"], c["carbon_hbond_angle"], has_h
     )
@@ -493,20 +530,23 @@ def detect_carbon_hbond(fa, fb, has_h):
 
 
 def detect_saltbridge(fa, fb):
-    cut = CUTOFFS["saltbridge_dist"]
+    cut = _active_cutoffs()["saltbridge_dist"]
     out = []
     for cats, anis in ((fa["cations"], fb["anions"]), (fb["cations"], fa["anions"])):
         for cpt, clbl, catom in cats:
             for apt, albl, aatom in anis:
                 if _dist(cpt, apt) <= cut:
                     out.append(
-                        _mk("saltbridge", "", clbl, albl, cpt, apt, catom, aatom)
+                        _mk(
+                            "saltbridge", "", clbl, albl, cpt, apt, catom, aatom,
+                            "cation", "anion"
+                        )
                     )
     return out
 
 
 def detect_pipi(fa, fb):
-    c = CUTOFFS
+    c = _active_cutoffs()
     out = []
     for r1 in fa["rings"]:
         for r2 in fb["rings"]:
@@ -527,13 +567,16 @@ def detect_pipi(fa, fb):
             else:
                 continue
             out.append(
-                _mk("pipi", subtype, r1.tag, r2.tag, r1.centroid, r2.centroid, r1, r2)
+                _mk(
+                    "pipi", subtype, r1.tag, r2.tag, r1.centroid, r2.centroid,
+                    r1, r2, "ring", "ring"
+                )
             )
     return out
 
 
 def detect_pication(fa, fb):
-    c = CUTOFFS
+    c = _active_cutoffs()
     out = []
     for rings, cats in ((fa["rings"], fb["cations"]), (fb["rings"], fa["cations"])):
         for r in rings:
@@ -542,37 +585,48 @@ def detect_pication(fa, fb):
                     continue
                 if _proj_offset(cpt, r.centroid, r.normal) > c["pication_offset"]:
                     continue
-                out.append(_mk("pication", "", r.tag, clbl, r.centroid, cpt, r, catom))
+                out.append(
+                    _mk(
+                        "pication", "", r.tag, clbl, r.centroid, cpt, r, catom,
+                        "ring", "cation"
+                    )
+                )
     return out
 
 
 def detect_pialkyl(fa, fb):
-    cut = CUTOFFS["pialkyl_dist"]
+    cut = _active_cutoffs()["pialkyl_dist"]
     out = []
     for rings, alks in ((fa["rings"], fb["alkyl"]), (fb["rings"], fa["alkyl"])):
         for r in rings:
             for a in alks:
                 if _dist(r.centroid, a.coord) <= cut:
                     out.append(
-                        _mk("pialkyl", "", r.tag, a.label(), r.centroid, a.coord, r, a)
+                        _mk(
+                            "pialkyl", "", r.tag, a.label(), r.centroid, a.coord,
+                            r, a, "ring", "alkyl"
+                        )
                     )
     return out
 
 
 def detect_alkyl(fa, fb):
-    cut = CUTOFFS["alkyl_dist"]
+    cut = _active_cutoffs()["alkyl_dist"]
     out = []
     for a in fa["alkyl"]:
         for b in fb["alkyl"]:
             if _dist(a.coord, b.coord) <= cut:
                 out.append(
-                    _mk("alkyl", "", a.label(), b.label(), a.coord, b.coord, a, b)
+                    _mk(
+                        "alkyl", "", a.label(), b.label(), a.coord, b.coord,
+                        a, b, "alkyl", "alkyl"
+                    )
                 )
     return out
 
 
 def detect_halogen(fa, fb):
-    c = CUTOFFS
+    c = _active_cutoffs()
     out = []
     for hals, accs in (
         (fa["halogens"], fb["acceptors"]),
@@ -594,13 +648,15 @@ def detect_halogen(fa, fb):
                         acc.coord,
                         x,
                         acc,
+                        "halogen",
+                        "acceptor",
                     )
                 )
     return out
 
 
 def detect_metal(fa, fb):
-    cut = CUTOFFS["metal_dist"]
+    cut = _active_cutoffs()["metal_dist"]
     out = []
     for metals, accs in (
         (fa["metals"], fb["acceptors"]),
@@ -619,13 +675,15 @@ def detect_metal(fa, fb):
                             acc.coord,
                             m,
                             acc,
+                            "metal",
+                            "acceptor",
                         )
                     )
     return out
 
 
 def detect_pi_sulfur(fa, fb):
-    cut = CUTOFFS["pi_sulfur_dist"]
+    cut = _active_cutoffs()["pi_sulfur_dist"]
     out = []
     for rings, sulfs in ((fa["rings"], fb["sulfurs"]), (fb["rings"], fa["sulfurs"])):
         for r in rings:
@@ -633,14 +691,15 @@ def detect_pi_sulfur(fa, fb):
                 if _dist(r.centroid, s.coord) <= cut:
                     out.append(
                         _mk(
-                            "pi_sulfur", "", r.tag, s.label(), r.centroid, s.coord, r, s
+                            "pi_sulfur", "", r.tag, s.label(), r.centroid, s.coord,
+                            r, s, "ring", "sulfur"
                         )
                     )
     return out
 
 
 def detect_pi_anion(fa, fb):
-    c = CUTOFFS
+    c = _active_cutoffs()
     out = []
     for rings, anis in ((fa["rings"], fb["anions"]), (fb["rings"], fa["anions"])):
         for r in rings:
@@ -649,52 +708,67 @@ def detect_pi_anion(fa, fb):
                     continue
                 if _proj_offset(apt, r.centroid, r.normal) > c["pi_anion_offset"]:
                     continue
-                out.append(_mk("pi_anion", "", r.tag, albl, r.centroid, apt, r, aatom))
+                out.append(
+                    _mk(
+                        "pi_anion", "", r.tag, albl, r.centroid, apt, r, aatom,
+                        "ring", "anion"
+                    )
+                )
     return out
 
 
 def detect_water_bridge(fa, fb, waters):
-    """Water-mediated H-bond. Ported. Emits two legs (partner--water) per bridge."""
-    c = CUTOFFS
+    """Return one semantic receptor-water-ligand record per bridge."""
+    c = _active_cutoffs()
 
     def _partners(feat):
-        seen, out = set(), []
-        for donor, _hs in feat["donors"]:
-            if donor.idx not in seen:
-                seen.add(donor.idx)
-                out.append(donor)
-        for acc in feat["acceptors"]:
-            if acc.idx not in seen:
-                seen.add(acc.idx)
-                out.append(acc)
-        return out
+        donors = {atom.idx: atom for atom, _hs in feat["donors"]}
+        acceptors = {atom.idx: atom for atom in feat["acceptors"]}
+        ordered_ids = tuple(donors) + tuple(
+            index for index in acceptors if index not in donors
+        )
+        return [
+            (
+                donors[index] if index in donors else acceptors[index],
+                (
+                    "donor_acceptor"
+                    if index in donors and index in acceptors
+                    else "donor" if index in donors else "acceptor"
+                ),
+            )
+            for index in ordered_ids
+        ]
 
     pa, pb = _partners(fa), _partners(fb)
     lo, hi = c["water_bridge_min"], c["water_bridge_max"]
     amin, amax = c["water_bridge_angle_min"], c["water_bridge_angle_max"]
     out = []
     for w in waters:
-        near_a = [p for p in pa if lo <= _dist(w.coord, p.coord) <= hi]
-        near_b = [p for p in pb if lo <= _dist(w.coord, p.coord) <= hi]
-        for pai in near_a:
-            for pbi in near_b:
+        near_a = [p for p in pa if lo <= _dist(w.coord, p[0].coord) <= hi]
+        near_b = [p for p in pb if lo <= _dist(w.coord, p[0].coord) <= hi]
+        for pai, role_a in near_a:
+            for pbi, role_b in near_b:
                 ang = _angle_at(w.coord, pai.coord, pbi.coord)
                 if not (amin <= ang <= amax):
                     continue
-                wlbl = w.label()
-                for partner in (pai, pbi):
-                    out.append(
-                        _mk(
-                            "water_bridge",
-                            "",
-                            partner.label(),
-                            wlbl,
-                            partner.coord,
-                            w.coord,
-                            partner,
-                            w,
-                        )
+                out.append(
+                    _mk(
+                        "water_bridge",
+                        "",
+                        pai.label(),
+                        pbi.label(),
+                        pai.coord,
+                        pbi.coord,
+                        pai,
+                        pbi,
+                        role_a,
+                        role_b,
+                        water_obj=w,
+                        receptor_water_distance=_dist(w.coord, pai.coord),
+                        ligand_water_distance=_dist(w.coord, pbi.coord),
+                        water_angle=ang,
                     )
+                )
     return out
 
 
@@ -739,27 +813,37 @@ def endpoint_name(obj):
     return obj.name
 
 
-def compute_interactions(receptor_atoms, ligand_atoms, waters=None, types=None):
+def compute_interactions(
+    receptor_atoms, ligand_atoms, waters=None, types=None, cutoffs=None
+):
     """Detect all requested interactions between receptor and ligand.
 
     Atoms must already have `.side` set ('receptor'/'ligand'/'water'). Returns a
     list of interaction dicts, each with an added 'dist' (endpoint separation).
     """
-    waters = waters or []
-    req = list(types) if types else list(VALID_TYPES)
-    has_h = any(a.elem == "H" for a in receptor_atoms) or any(
-        a.elem == "H" for a in ligand_atoms
+    token = _ACTIVE_CUTOFFS.set(
+        MappingProxyType(dict(cutoffs if cutoffs is not None else CUTOFFS))
     )
+    try:
+        waters = waters or []
+        req = list(types) if types else list(VALID_TYPES)
+        # Preserve one coherent policy for the whole complex. If any explicit
+        # hydrogens are present, only donors with bonded H atoms are eligible
+        # and angular geometry is required on both sides. If none are present,
+        # the documented heavy-atom distance fallback applies to both sides.
+        has_h = any(a.elem == "H" for a in (*receptor_atoms, *ligand_atoms))
 
-    feat_r = classify(receptor_atoms, _build_rings(receptor_atoms), has_h)
-    feat_l = classify(ligand_atoms, _build_rings(ligand_atoms), has_h)
+        feat_r = classify(receptor_atoms, _build_rings(receptor_atoms), has_h)
+        feat_l = classify(ligand_atoms, _build_rings(ligand_atoms), has_h)
 
-    inters = []
-    for itype in req:
-        if itype == "water_bridge":
-            inters.extend(detect_water_bridge(feat_r, feat_l, waters))
-        elif itype in DETECTORS:
-            inters.extend(DETECTORS[itype](feat_r, feat_l, has_h))
-    for it in inters:
-        it["dist"] = _dist(it["a_point"], it["b_point"])
-    return inters
+        inters = []
+        for itype in req:
+            if itype == "water_bridge":
+                inters.extend(detect_water_bridge(feat_r, feat_l, waters))
+            elif itype in DETECTORS:
+                inters.extend(DETECTORS[itype](feat_r, feat_l, has_h))
+        for it in inters:
+            it["dist"] = _dist(it["a_point"], it["b_point"])
+        return inters
+    finally:
+        _ACTIVE_CUTOFFS.reset(token)
