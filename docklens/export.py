@@ -17,6 +17,7 @@ from .export_views import (
     build_export_view,
     detail_dataframe,
     input_qc_dataframe,
+    key_residue_coverage_dataframe,
     parameters_dataframe,
     residue_matrix_dataframe,
     summary_dataframe,
@@ -70,17 +71,19 @@ def _atomic_csv(frame, path):
 
 
 def export_csv(result, path_prefix, export_filter=None) -> list:
-    """Write compatible Summary/Detail CSV files atomically."""
+    """Write compatible CSV exports atomically."""
     export_filter = export_filter or ExportFilter()
     view = build_export_view(result, export_filter)
     prefix = os.fspath(path_prefix)
     if prefix.lower().endswith(".csv"):
         prefix = prefix[:-4]
     summary_path = Path(prefix + "_summary.csv")
+    coverage_path = Path(prefix + "_key_residue_coverage.csv")
     detail_path = Path(prefix + "_detail.csv")
     _atomic_csv(summary_dataframe(view), summary_path)
+    _atomic_csv(key_residue_coverage_dataframe(view), coverage_path)
     _atomic_csv(detail_dataframe(view), detail_path)
-    return [str(summary_path), str(detail_path)]
+    return [str(summary_path), str(coverage_path), str(detail_path)]
 
 
 def _fill(hex_color):
@@ -172,7 +175,13 @@ def _format_standard_sheet(worksheet):
 
 
 def _style_workbook(workbook):
-    for name in ("Summary", "Detail", "Parameters", "Input QC"):
+    for name in (
+        "Summary",
+        "Key Residue Coverage",
+        "Detail",
+        "Parameters",
+        "Input QC",
+    ):
         _format_standard_sheet(workbook[name])
     summary = workbook["Summary"]
     summary_header = {cell.value: cell.column for cell in summary[1]}
@@ -211,7 +220,7 @@ def _neutralize_formulas(workbook):
 
 
 def export_xlsx(result, path, export_filter=None) -> str:
-    """Write the five-sheet DockLens schema v2 workbook atomically."""
+    """Write the DockLens schema v3 workbook atomically."""
     export_filter = export_filter or ExportFilter()
     view = build_export_view(result, export_filter)
     output = Path(os.fspath(path))
@@ -221,6 +230,7 @@ def export_xlsx(result, path, export_filter=None) -> str:
     matrix = residue_matrix_dataframe(view, mode=export_filter.matrix_mode)
     frames = {
         "Summary": summary_dataframe(view),
+        "Key Residue Coverage": key_residue_coverage_dataframe(view),
         "Detail": detail_dataframe(view),
         "Parameters": parameters_dataframe(result, export_filter),
         "Input QC": input_qc_dataframe(result),
@@ -259,6 +269,7 @@ __all__ = [
     "export_csv",
     "export_xlsx",
     "input_qc_dataframe",
+    "key_residue_coverage_dataframe",
     "parameters_dataframe",
     "residue_matrix_dataframe",
     "summary_dataframe",

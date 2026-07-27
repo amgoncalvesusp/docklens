@@ -60,7 +60,9 @@ def test_vector_helpers_and_cutoff_snapshots_are_isolated():
     assert core._plane_angle((0, 0, 1), (0, 1, 0)) == 90.0
     assert core._proj_offset((1, 0, 2), (0, 0, 0), (0, 0, 1)) == 1.0
     assert core._planar_deviation([(0, 0, 0), (1, 0, 0), (0, 1, 0)]) == pytest.approx(0)
-    assert core.cutoffs_for_preset("dsv")["hbond_dist"] == 3.5
+    assert core.cutoffs_for_preset("dsv")["hbond_dist"] == 4.1
+    assert core.cutoffs_for_preset("dsv")["hbond_h_a_dist"] == 3.1
+    assert "hbond_h_a_dist" not in core.cutoffs_for_preset("plip")
     assert core.cutoffs_for_preset("unknown")["hbond_dist"] == 4.1
 
 

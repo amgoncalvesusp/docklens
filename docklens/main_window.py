@@ -5,12 +5,13 @@ Load a file / list / folder, resolve ligand vs. receptor, detect interactions an
 show two sortable/filterable tables (Summary, Detail) with distinct per-type
 colouring. Key residues are editable as free text AND pickable from a checkbox
 list of the detected protein residues; counts recompute without re-detection.
-An H-bond criteria preset switches between PLIP (default) and a stricter
-Discovery-Studio-like definition. Export to CSV / XLSX. Reset starts fresh.
+An H-bond criteria preset switches between PLIP (default) and a chemistry-aware
+strict profile. Export to CSV / XLSX. Reset starts fresh.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -18,13 +19,17 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from . import __version__, batch_runner as br
 from . import export
+from .analysis_profiles import build_analysis_view
+from .integration_result import write_integration_result
 from .interaction_core import (
     INTERACTION_COLORS,
     VALID_TYPES,
     color_hex,
 )
+from .residue_keys import match_key_residues, parse_key_residues
 
 INVENTOR = "Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA)"
+LOGGER = logging.getLogger(__name__)
 
 # ---- BioLens / DockLens palette ----------------------------------------------
 BLUE = "#003B5C"  # primary: titles, primary buttons, status
@@ -181,7 +186,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1200, 800)
         self._files = []
         self._result = None
+        self._launch_manifest = None
         self._syncing = False
+        self._key_invalid_tokens = ()
         self._build_ui()
 
     # ------------------------------------------------------------------ UI
@@ -238,8 +245,17 @@ class MainWindow(QtWidgets.QMainWindow):
         top.addWidget(QtWidgets.QLabel("H-bond criteria:"))
         self.preset_combo = QtWidgets.QComboBox()
         self.preset_combo.addItem("PLIP (default)", "plip")
-        self.preset_combo.addItem("Discovery Studio-like (strict)", "dsv")
+        self.preset_combo.addItem(
+            "DS-calibrated beta (explicit-H geometry)", "dsv"
+        )
         top.addWidget(self.preset_combo)
+        top.addSpacing(12)
+        top.addWidget(QtWidgets.QLabel("Analysis view:"))
+        self.analysis_combo = QtWidgets.QComboBox()
+        self.analysis_combo.addItem("Complete", "complete")
+        self.analysis_combo.addItem("Conservative polar/specific", "ds_like")
+        self.analysis_combo.currentIndexChanged.connect(self._refresh_tables)
+        top.addWidget(self.analysis_combo)
         top.addStretch(1)
         b_csv = QtWidgets.QPushButton("Export CSV")
         b_xlsx = QtWidgets.QPushButton("Export XLSX")
@@ -255,7 +271,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         lay.addWidget(QtWidgets.QLabel("Key residues:"), 0, 0)
         self.key_edit = QtWidgets.QLineEdit()
-        self.key_edit.setPlaceholderText("e.g. ASP32 LYS36 SER70 (space/comma)")
+        self.key_edit.setPlaceholderText(
+            "e.g. SER70; LYS73; GLU166 (space, comma, semicolon or line break)"
+        )
         self.key_edit.editingFinished.connect(self._key_text_changed)
         lay.addWidget(self.key_edit, 0, 1, 1, 2)
 
@@ -280,6 +298,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.res_list.setMaximumHeight(140)
         self.res_list.itemChanged.connect(self._residue_checks_changed)
         lay.addWidget(self.res_list, 2, 0, 1, 6)
+        self.key_status = QtWidgets.QLabel("No key residues configured.")
+        self.key_status.setWordWrap(True)
+        self.key_status.setObjectName("subtitle")
+        lay.addWidget(self.key_status, 3, 0, 1, 6)
         return card
 
     def _type_card(self):
@@ -297,13 +319,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _tables(self):
         self.tabs = QtWidgets.QTabWidget()
         self.summary_view = QtWidgets.QTableView()
+        self.coverage_view = QtWidgets.QTableView()
         self.detail_view = QtWidgets.QTableView()
-        for v in (self.summary_view, self.detail_view):
+        for v in (self.summary_view, self.coverage_view, self.detail_view):
             v.setSortingEnabled(True)
             v.setAlternatingRowColors(True)
             v.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             v.horizontalHeader().setStretchLastSection(True)
         self.tabs.addTab(self.summary_view, "Summary")
+        self.tabs.addTab(self.coverage_view, "Key Residue Coverage")
         self.tabs.addTab(self.detail_view, "Detail")
         return self.tabs
 
@@ -311,14 +335,18 @@ class MainWindow(QtWidgets.QMainWindow):
         import pandas as pd
 
         self.summary_model = DataFrameModel(pd.DataFrame())
+        self.coverage_model = DataFrameModel(pd.DataFrame())
         self.detail_model = DataFrameModel(
             pd.DataFrame(), colour_type_col="interaction_type"
         )
         self.summary_proxy = MultiFilterProxy()
         self.summary_proxy.setSourceModel(self.summary_model)
+        self.coverage_proxy = MultiFilterProxy()
+        self.coverage_proxy.setSourceModel(self.coverage_model)
         self.detail_proxy = MultiFilterProxy()
         self.detail_proxy.setSourceModel(self.detail_model)
         self.summary_view.setModel(self.summary_proxy)
+        self.coverage_view.setModel(self.coverage_proxy)
         self.detail_view.setModel(self.detail_proxy)
 
     # -------------------------------------------------------------- actions
@@ -345,18 +373,29 @@ class MainWindow(QtWidgets.QMainWindow):
     def _hbond_preset(self):
         return self.preset_combo.currentData()
 
+    def _analysis_profile(self):
+        return self.analysis_combo.currentData()
+
     def _run(self):
         if not self._files:
             QtWidgets.QMessageBox.warning(
                 self, "No input", "Open a file or folder first."
             )
             return
-        result = br.run(
-            self._files,
-            key_residues=self.key_edit.text(),
-            hbond_preset=self._hbond_preset(),
-        )
-        if result.pending:
+        if self._launch_manifest is not None:
+            result = br.run_paired(
+                self._launch_manifest.receptor_path,
+                self._launch_manifest.poses_path,
+                key_residues=self.key_edit.text(),
+                hbond_preset=self._hbond_preset(),
+            )
+        else:
+            result = br.run(
+                self._files,
+                key_residues=self.key_edit.text(),
+                hbond_preset=self._hbond_preset(),
+            )
+        if result.pending and self._launch_manifest is None:
             if not self._confirm_pending(result):
                 self.status.showMessage("Run cancelled at ligand/receptor confirmation.")
                 return
@@ -367,6 +406,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 hbond_preset=self._hbond_preset(),
             )
         self._result = result
+        self._write_dockinghub_result(show_warning=True)
         self._populate_residue_list()
         self._refresh_tables()
         errors = sum(record.status == "error" for record in result.input_qc)
@@ -386,6 +426,46 @@ class MainWindow(QtWidgets.QMainWindow):
                 "%d input file(s) could not be processed. Details will be included "
                 "in the Input QC export sheet." % errors,
             )
+
+    def load_manifest(self, manifest):
+        """Load and immediately analyze an explicit DockingHub receptor/poses pair."""
+        preset_index = self.preset_combo.findData(manifest.hbond_preset)
+        if preset_index >= 0:
+            self.preset_combo.setCurrentIndex(preset_index)
+        self._key_invalid_tokens = ()
+        self.key_edit.setText(" ".join(manifest.key_residues))
+        self._files = [str(manifest.receptor_path), str(manifest.poses_path)]
+        self._launch_manifest = manifest
+        try:
+            self._result = br.run_paired(
+                manifest.receptor_path,
+                manifest.poses_path,
+                key_residues=manifest.key_residues,
+                hbond_preset=manifest.hbond_preset,
+            )
+        except Exception:  # noqa: BLE001 - GUI boundary must contain parser failures
+            LOGGER.exception("Unexpected DockingHub paired-analysis failure")
+            self._result = None
+            self.status.showMessage("DockingHub pair could not be analyzed.")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "DockingHub integration error",
+                "The receptor/poses pair could not be analyzed. Verify both files in DockingHub and try again.",
+            )
+            return
+        self._populate_residue_list()
+        self._refresh_tables()
+        roundtrip_failed = not self._write_dockinghub_result(show_warning=True)
+        errors = sum(record.status == "error" for record in self._result.input_qc)
+        self.status.showMessage(
+            "DockingHub pair: %d pose(s), %d interaction(s), %d error(s)%s."
+            % (
+                len(self._result.summaries),
+                len(self._result.details),
+                errors,
+                "; result export failed" if roundtrip_failed else "; result ready",
+            )
+        )
 
     def _confirm_pending(self, result):
         previews = "\n\n".join(
@@ -410,11 +490,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_tables(self):
         if self._result is None:
             return
-        self.summary_model.set_dataframe(export.summary_dataframe(self._result))
-        self.detail_model.set_dataframe(export.detail_dataframe(self._result))
+        view = build_analysis_view(self._result, self._analysis_profile())
+        self.summary_model.set_dataframe(export.summary_dataframe(view))
+        self.coverage_model.set_dataframe(
+            export.key_residue_coverage_dataframe(view)
+        )
+        self.detail_model.set_dataframe(export.detail_dataframe(view))
         self._apply_filters()
-        if len(self._result.details) < 500:
+        if len(view.details) < 500:
             self.summary_view.resizeColumnsToContents()
+            self.coverage_view.resizeColumnsToContents()
             self.detail_view.resizeColumnsToContents()
 
     # ---- key residues: text field <-> checkbox list stay in sync ----
@@ -429,6 +514,7 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
             self.res_list.addItem(item)
         self._syncing = False
+        self._update_key_status()
 
     def _residue_checks_changed(self, _item):
         if self._syncing:
@@ -441,13 +527,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._syncing = True
         self.key_edit.setText(" ".join(checked))
         self._syncing = False
+        self._key_invalid_tokens = ()
         self._recompute_key()
 
     def _key_text_changed(self):
         if self._syncing:
             return
-        key_set = br.normalize_key_residues(self.key_edit.text())
+        parsed = parse_key_residues(self.key_edit.text())
+        key_set = frozenset(parsed.keys)
+        self._key_invalid_tokens = parsed.invalid
         self._syncing = True
+        self.key_edit.setText(" ".join(parsed.keys))
         for i in range(self.res_list.count()):
             it = self.res_list.item(i)
             on = (
@@ -457,11 +547,65 @@ class MainWindow(QtWidgets.QMainWindow):
         self._syncing = False
         self._recompute_key()
 
+    def _update_key_status(self):
+        keys = tuple(sorted(br.normalize_key_residues(self.key_edit.text())))
+        if not keys:
+            message = "No key residues configured."
+        elif self._result is None:
+            message = (
+                f"{len(keys)} key residue(s) configured; matching will be "
+                "checked after detection."
+            )
+        else:
+            match = match_key_residues(keys, self._result.receptor_residues)
+            message = (
+                f"{len(match.matched_keys)} of {len(keys)} key residue "
+                "identifier(s) matched"
+            )
+            if match.matched_residues:
+                message += (
+                    f" ({len(match.matched_residues)} concrete receptor "
+                    "residue(s))"
+                )
+            if match.unmatched_keys:
+                message += "; unmatched: " + ", ".join(match.unmatched_keys)
+            if match.ambiguous_keys:
+                message += (
+                    "; chain-ambiguous: " + ", ".join(match.ambiguous_keys)
+                )
+            message += "."
+        if self._key_invalid_tokens:
+            message += " Invalid: " + ", ".join(self._key_invalid_tokens) + "."
+        self.key_status.setText(message)
+
     def _recompute_key(self):
         if self._result is None:
+            self._update_key_status()
             return
         self._result = br.recompute_key(self._result, self.key_edit.text())
         self._refresh_tables()
+        self._update_key_status()
+        self._write_dockinghub_result(show_warning=False)
+
+    def _write_dockinghub_result(self, *, show_warning):
+        if (
+            self._result is None
+            or self._launch_manifest is None
+            or getattr(self._launch_manifest, "result_path", None) is None
+        ):
+            return True
+        try:
+            write_integration_result(self._launch_manifest, self._result)
+            return True
+        except (OSError, ValueError):
+            self.status.showMessage("DockingHub result export failed.")
+            if show_warning:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "DockingHub result warning",
+                    "The analysis is available in DockLens, but its DockingHub result file could not be written.",
+                )
+            return False
 
     def _filter_residue_list(self, text):
         needle = text.lower()
@@ -475,14 +619,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.detail_proxy.key_only = self.key_only_cb.isChecked()
         self.detail_proxy.text_filter = self.search_edit.text()
         self.summary_proxy.text_filter = self.search_edit.text()
+        self.coverage_proxy.text_filter = self.search_edit.text()
         self.detail_proxy.invalidateFilter()
         self.summary_proxy.invalidateFilter()
+        self.coverage_proxy.invalidateFilter()
 
     def _reset(self):
         """Clear everything for a fresh analysis."""
         self._files = []
         self._result = None
+        self._launch_manifest = None
         self._syncing = True
+        self._key_invalid_tokens = ()
         self.key_edit.clear()
         self.search_edit.clear()
         self.res_filter.clear()
@@ -491,11 +639,14 @@ class MainWindow(QtWidgets.QMainWindow):
         for cb in self.type_boxes.values():
             cb.setChecked(True)
         self.preset_combo.setCurrentIndex(0)
+        self.analysis_combo.setCurrentIndex(0)
         self._syncing = False
         import pandas as pd
 
         self.summary_model.set_dataframe(pd.DataFrame())
+        self.coverage_model.set_dataframe(pd.DataFrame())
         self.detail_model.set_dataframe(pd.DataFrame())
+        self._update_key_status()
         self.status.showMessage(
             "Reset. Open a file, list or folder, then Run detection."
         )
@@ -573,6 +724,7 @@ class MainWindow(QtWidgets.QMainWindow):
             text=self.search_edit.text() if scope == "filtered" else "",
             key_only=(self.key_only_cb.isChecked() if scope == "filtered" else False),
             matrix_mode=matrix_mode,
+            analysis_profile=self._analysis_profile(),
         )
 
     def _require_result(self):
@@ -611,7 +763,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.exec_()
 
 
-def launch():
+def launch(launch_manifest=None):
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("DockLens")
     app.setStyleSheet(_STYLE)
@@ -633,6 +785,8 @@ def launch():
 
     win = MainWindow()
     win.show()
+    if launch_manifest is not None:
+        win.load_manifest(launch_manifest)
     if splash is not None:
         splash.finish(win)
     return app.exec_()

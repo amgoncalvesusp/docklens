@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .entity_resolver import resolve, resolve_manual, set_sides
+from .entity_resolver import Resolution, _split_waters, resolve, resolve_manual, set_sides
 from .interaction_core import (
     HBOND_PRESETS,
     VALID_TYPES,
@@ -41,6 +41,7 @@ from .results import (
     make_result,
     with_key_residues,
 )
+from .residue_keys import normalize_key_residues as _normalize_key_residues
 
 _PARSERS = {".mol2": parse_mol2, ".pdb": parse_pdb, ".pdbqt": parse_pdbqt}
 SUPPORTED_EXT = tuple(_PARSERS)
@@ -158,9 +159,7 @@ def parse_file(path):
 
 def normalize_key_residues(items):
     """Normalise a user key-residue list to an upper-case set."""
-    if isinstance(items, str):
-        items = items.replace(",", " ").split()
-    return {str(x).strip().upper() for x in items if str(x).strip()}
+    return set(_normalize_key_residues(items))
 
 
 def _normalize_types(types):
@@ -261,6 +260,7 @@ def _detail_from_interaction(
     else:
         lig_role, rec_role = it.get("b_role", ""), it.get("a_role", "")
     water_obj = it.get("water_obj")
+    hydrogen_obj = it.get("hydrogen_obj")
     return Detail(
         ligand_id=ligand_id,
         source_file=os.path.basename(source_file),
@@ -282,6 +282,20 @@ def _detail_from_interaction(
         receptor_water_distance_A=it.get("receptor_water_distance"),
         ligand_water_distance_A=it.get("ligand_water_distance"),
         water_angle_deg=it.get("water_angle"),
+        chemistry_basis=it.get("chemistry_basis", ""),
+        chemistry_confidence=it.get("confidence", ""),
+        hydrogen_atom=hydrogen_obj.name if hydrogen_obj is not None else "",
+        hydrogen_atom_serial=(
+            hydrogen_obj.serial if hydrogen_obj is not None else None
+        ),
+        hydrogen_acceptor_distance_A=it.get("hydrogen_acceptor_distance"),
+        donor_hydrogen_acceptor_angle_deg=it.get(
+            "donor_hydrogen_acceptor_angle"
+        ),
+        hydrogen_acceptor_base_angle_deg=it.get(
+            "hydrogen_acceptor_base_angle"
+        ),
+        theta_deg=it.get("theta"),
     )
 
 
@@ -336,8 +350,8 @@ def run(
     confirm_fallback if True, fallback resolutions are run anyway (headless);
                      if False, they are collected in RunResult.pending instead.
     manual_overrides {source_file: set_of_ligand_serials} to force a split.
-    hbond_preset     'plip' (default, permissive) or 'dsv' (Discovery-Studio-like,
-                     stricter H-bond distance/angle).
+    hbond_preset     'plip' (default, legacy) or 'dsv' (chemistry-aware strict;
+                     Discovery Studio calibration is still pending).
     """
     if isinstance(max_file_size_bytes, bool) or not isinstance(
         max_file_size_bytes, int
@@ -529,6 +543,7 @@ def run(
                         res.waters,
                         requested_types,
                         cutoffs=effective_cutoffs,
+                        chemistry_profile=hbond_preset,
                     )
                     details = [
                         _detail_from_interaction(
@@ -605,6 +620,140 @@ def run(
         details=details_out,
         summaries=summaries_out,
         pending=pending_out,
+        key_residues=key_set,
+        receptor_residues=receptor_residues,
+        input_qc=qc_out,
+        parameters=parameters,
+    )
+
+
+def run_paired(
+    receptor_path,
+    poses_path,
+    types=None,
+    key_residues=None,
+    hbond_preset="plip",
+    max_file_size_bytes=DEFAULT_MAX_FILE_SIZE_BYTES,
+):
+    """Detect interactions using an explicit receptor plus a multipose ligand file."""
+    receptor_path, poses_path = _coerce_paths([receptor_path, poses_path])
+    for path in (receptor_path, poses_path):
+        if not os.path.isfile(path) or not path.lower().endswith(SUPPORTED_EXT):
+            raise ValueError("Paired input is not a supported structure file")
+        if os.path.getsize(path) > max_file_size_bytes:
+            raise ValueError("Paired input exceeds the configured size limit")
+    receptor_poses = parse_file(receptor_path)
+    ligand_poses = parse_file(poses_path)
+    if len(receptor_poses) != 1:
+        raise ValueError("Paired receptor must contain exactly one structural model")
+    if not ligand_poses:
+        raise ValueError("Paired poses file contains no structural poses")
+
+    requested_types = _normalize_types(types)
+    preset = _normalize_preset(hbond_preset)
+    key_set = normalize_key_residues(key_residues or [])
+    effective_cutoffs = cutoffs_for_preset(preset)
+    receptor_atoms, receptor_waters = _split_waters(receptor_poses[0].atoms)
+    parameters = AnalysisParameters(
+        app_version=__version__,
+        started_at=datetime.now(timezone.utc).isoformat(),
+        hbond_preset=preset,
+        cutoffs=tuple(sorted((key, float(value)) for key, value in effective_cutoffs.items())),
+        interaction_types=requested_types,
+        key_residues=tuple(sorted(key_set)),
+    )
+    details_out = []
+    summaries_out = []
+    qc_out = []
+    receptor_residues = set()
+    ligand_stem = os.path.splitext(os.path.basename(poses_path))[0]
+    source_id = "PAIR000001"
+
+    for pose in ligand_poses:
+        pose_no = pose.pose_index + 1
+        pose_id = "%s:P%04d" % (source_id, pose_no)
+        ligand_id = "%s_pose_%04d" % (ligand_stem, pose_no)
+        resolution = Resolution(
+            receptor_atoms,
+            pose.atoms,
+            receptor_waters,
+            ligand_id,
+            "paired-manifest",
+        )
+        try:
+            set_sides(resolution)
+            receptor_residues.update(atom.res_tag() for atom in receptor_atoms)
+            interactions = compute_interactions(
+                receptor_atoms,
+                pose.atoms,
+                receptor_waters,
+                requested_types,
+                cutoffs=effective_cutoffs,
+                chemistry_profile=preset,
+            )
+            details = [
+                _detail_from_interaction(
+                    interaction,
+                    ligand_id,
+                    poses_path,
+                    key_set,
+                    source_id=source_id,
+                    pose_id=pose_id,
+                    interaction_index=index,
+                    pose_no=pose_no,
+                    sol=pose.sol,
+                    score=pose.score,
+                    resolution_method="paired-manifest",
+                )
+                for index, interaction in enumerate(interactions, 1)
+            ]
+            summaries_out.append(_summarize(
+                ligand_id,
+                poses_path,
+                pose.sol,
+                pose_no,
+                pose.score,
+                details,
+                key_set,
+                source_id=source_id,
+                pose_id=pose_id,
+                resolution_method="paired-manifest",
+            ))
+            details_out.extend(details)
+            qc_out.append(InputQC(
+                source_id=source_id,
+                source_file=os.path.basename(poses_path),
+                source_path=poses_path,
+                pose_id=pose_id,
+                status="success",
+                format=pose.fmt,
+                poses_found=len(ligand_poses),
+                poses_processed=1,
+                resolution_method="paired-manifest",
+                receptor_atoms=len(receptor_atoms),
+                ligand_atoms=len(pose.atoms),
+                water_atoms=len(receptor_waters),
+            ))
+        except Exception as exc:  # noqa: BLE001 - isolate one paired pose
+            qc_out.append(InputQC(
+                source_id=source_id,
+                source_file=os.path.basename(poses_path),
+                source_path=poses_path,
+                pose_id=pose_id,
+                status="error",
+                code="pose_error",
+                message=_safe_exception_message("Could not process paired pose", exc),
+                format=pose.fmt,
+                poses_found=len(ligand_poses),
+                resolution_method="paired-manifest",
+                receptor_atoms=len(receptor_atoms),
+                ligand_atoms=len(pose.atoms),
+                water_atoms=len(receptor_waters),
+            ))
+
+    return make_result(
+        details=details_out,
+        summaries=summaries_out,
         key_residues=key_set,
         receptor_residues=receptor_residues,
         input_qc=qc_out,

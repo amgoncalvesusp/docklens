@@ -6,7 +6,10 @@ from dataclasses import replace
 
 import pandas as pd
 
+from .analysis_profiles import build_analysis_view
 from .interaction_core import VALID_TYPES
+from .result_analysis import analyze_key_residues, configured_key_residues
+from .residue_keys import match_key_residues
 from .results import ExportFilter, RunResult
 
 
@@ -18,6 +21,11 @@ SUMMARY_BASE_COLS = [
     "docking_score",
     "n_total_interactions",
     "n_key_residue_interactions",
+    "distinct_key_residue_count",
+    "configured_key_count",
+    "key_residue_coverage",
+    "conventional_hbond_residue_count",
+    "key_interaction_type_diversity",
 ]
 SUMMARY_META_COLS = ["source_path", "source_id", "pose_id", "resolution_method"]
 DETAIL_BASE_COLS = [
@@ -30,6 +38,14 @@ DETAIL_BASE_COLS = [
     "receptor_atom",
     "distance_A",
     "is_key_residue",
+    "chemistry_basis",
+    "chemistry_confidence",
+    "hydrogen_atom",
+    "hydrogen_atom_serial",
+    "hydrogen_acceptor_distance_A",
+    "donor_hydrogen_acceptor_angle_deg",
+    "hydrogen_acceptor_base_angle_deg",
+    "theta_deg",
 ]
 DETAIL_META_COLS = [
     "source_id",
@@ -75,6 +91,16 @@ def _matches_text(detail, needle):
 def build_export_view(result: RunResult, export_filter: ExportFilter) -> RunResult:
     if export_filter.scope == "all":
         return result
+    result = build_analysis_view(result, export_filter.analysis_profile)
+    if export_filter.key_only and result.key_residues:
+        key_match = match_key_residues(
+            result.key_residues,
+            result.receptor_residues,
+        )
+        if not key_match.matched_keys:
+            raise ValueError(
+                "No configured key residue exists in the analyzed receptor"
+            )
     needle = export_filter.text.strip().lower()
     details = tuple(
         detail
@@ -110,7 +136,11 @@ def build_export_view(result: RunResult, export_filter: ExportFilter) -> RunResu
 
 def summary_dataframe(result: RunResult) -> pd.DataFrame:
     rows = []
+    metrics_by_pose = {
+        metrics.pose_id: metrics for metrics in analyze_key_residues(result)
+    }
     for summary in result.summaries:
+        metrics = metrics_by_pose[summary.pose_id]
         row = {
             "ligand_id": summary.ligand_id,
             "source_file": summary.source_file,
@@ -119,6 +149,15 @@ def summary_dataframe(result: RunResult) -> pd.DataFrame:
             "docking_score": summary.docking_score,
             "n_total_interactions": summary.n_total_interactions,
             "n_key_residue_interactions": summary.n_key_residue_interactions,
+            "distinct_key_residue_count": metrics.distinct_key_residue_count,
+            "configured_key_count": metrics.configured_key_count,
+            "key_residue_coverage": metrics.coverage,
+            "conventional_hbond_residue_count": (
+                metrics.conventional_hbond_residue_count
+            ),
+            "key_interaction_type_diversity": (
+                metrics.interaction_type_diversity
+            ),
             "source_path": summary.source_path,
             "source_id": summary.source_id,
             "pose_id": summary.pose_id,
@@ -130,6 +169,69 @@ def summary_dataframe(result: RunResult) -> pd.DataFrame:
     return pd.DataFrame(
         rows, columns=SUMMARY_BASE_COLS + SUMMARY_META_COLS + list(VALID_TYPES)
     )
+
+
+KEY_RESIDUE_COVERAGE_COLS = [
+    "ligand_id",
+    "source_file",
+    "source_path",
+    "source_id",
+    "pose_id",
+    "sol",
+    "pose",
+    "docking_score",
+    "raw_key_pair_count",
+    "distinct_key_residue_count",
+    "configured_key_count",
+    "key_residue_coverage",
+    "conventional_hbond_residue_count",
+    "key_interaction_type_diversity",
+    "distinct_key_residues",
+    "conventional_hbond_residues",
+    "key_interaction_types",
+]
+
+
+def key_residue_coverage_dataframe(result: RunResult) -> pd.DataFrame:
+    """Build an auditable ranking view without conflating pairs and coverage."""
+    summaries = {summary.pose_id: summary for summary in result.summaries}
+    rows = []
+    for metrics in analyze_key_residues(result):
+        summary = summaries.get(metrics.pose_id)
+        rows.append(
+            {
+                "ligand_id": summary.ligand_id if summary else "",
+                "source_file": summary.source_file if summary else "",
+                "source_path": summary.source_path if summary else "",
+                "source_id": summary.source_id if summary else "",
+                "pose_id": metrics.pose_id,
+                "sol": summary.sol if summary else None,
+                "pose": summary.pose if summary else None,
+                "docking_score": summary.docking_score if summary else None,
+                "raw_key_pair_count": metrics.raw_key_pair_count,
+                "distinct_key_residue_count": (
+                    metrics.distinct_key_residue_count
+                ),
+                "configured_key_count": metrics.configured_key_count,
+                "key_residue_coverage": metrics.coverage,
+                "conventional_hbond_residue_count": (
+                    metrics.conventional_hbond_residue_count
+                ),
+                "key_interaction_type_diversity": (
+                    metrics.interaction_type_diversity
+                ),
+                "distinct_key_residues": "; ".join(
+                    metrics.distinct_key_residues
+                ),
+                "conventional_hbond_residues": "; ".join(
+                    metrics.conventional_hbond_residues
+                ),
+                "key_interaction_types": "; ".join(
+                    metrics.interaction_types
+                ),
+            }
+        )
+    return pd.DataFrame(rows, columns=KEY_RESIDUE_COVERAGE_COLS)
 
 
 def _serials(endpoint):
@@ -151,6 +253,20 @@ def detail_dataframe(result: RunResult) -> pd.DataFrame:
                 "receptor_atom": detail.receptor_atom,
                 "distance_A": detail.distance_A,
                 "is_key_residue": detail.is_key_residue,
+                "chemistry_basis": detail.chemistry_basis,
+                "chemistry_confidence": detail.chemistry_confidence,
+                "hydrogen_atom": detail.hydrogen_atom,
+                "hydrogen_atom_serial": detail.hydrogen_atom_serial,
+                "hydrogen_acceptor_distance_A": (
+                    detail.hydrogen_acceptor_distance_A
+                ),
+                "donor_hydrogen_acceptor_angle_deg": (
+                    detail.donor_hydrogen_acceptor_angle_deg
+                ),
+                "hydrogen_acceptor_base_angle_deg": (
+                    detail.hydrogen_acceptor_base_angle_deg
+                ),
+                "theta_deg": detail.theta_deg,
                 "source_id": detail.source_id,
                 "pose_id": detail.pose_id,
                 "interaction_id": detail.interaction_id,
@@ -228,6 +344,10 @@ def residue_matrix_dataframe(result: RunResult, mode="count") -> pd.DataFrame:
 def parameters_dataframe(result: RunResult, export_filter=None) -> pd.DataFrame:
     export_filter = export_filter or ExportFilter()
     params = result.parameters
+    key_match = match_key_residues(
+        configured_key_residues(result),
+        result.receptor_residues,
+    )
     rows = [
         ("schema_version", params.schema_version),
         ("app_version", params.app_version),
@@ -235,8 +355,12 @@ def parameters_dataframe(result: RunResult, export_filter=None) -> pd.DataFrame:
         ("hbond_preset", params.hbond_preset),
         ("interaction_types", ", ".join(params.interaction_types)),
         ("key_residues", ", ".join(params.key_residues)),
+        ("key_residues_matched", ", ".join(key_match.matched_keys)),
+        ("key_residues_unmatched", ", ".join(key_match.unmatched_keys)),
+        ("key_residues_ambiguous", ", ".join(key_match.ambiguous_keys)),
         ("counting_unit", params.counting_unit),
         ("export_scope", export_filter.scope),
+        ("analysis_profile", export_filter.analysis_profile),
         ("matrix_mode", export_filter.matrix_mode),
         ("filter_text", export_filter.text),
         ("filter_key_only", export_filter.key_only),

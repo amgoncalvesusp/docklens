@@ -80,7 +80,7 @@ def test_water_bridge_is_one_semantic_record():
     assert records[0]["ligand_water_distance"] == pytest.approx(3.0, abs=0.01)
 
 
-def test_xlsx_v2_has_five_sheets_styles_qc_and_safe_text(fixture_path, tmp_path):
+def test_xlsx_v3_has_analysis_sheets_styles_qc_and_safe_text(fixture_path, tmp_path):
     result = br.run(
         [fixture_path("minimal_complex.pdb"), fixture_path("invalid.pdb")]
     )
@@ -97,6 +97,7 @@ def test_xlsx_v2_has_five_sheets_styles_qc_and_safe_text(fixture_path, tmp_path)
     assert workbook.sheetnames == [
         "Summary",
         "Residue Matrix",
+        "Key Residue Coverage",
         "Detail",
         "Parameters",
         "Input QC",
@@ -104,12 +105,25 @@ def test_xlsx_v2_has_five_sheets_styles_qc_and_safe_text(fixture_path, tmp_path)
     assert workbook["Summary"].freeze_panes
     assert workbook["Detail"].auto_filter.ref
     assert workbook["Residue Matrix"].merged_cells.ranges
+    coverage_headers = [
+        cell.value for cell in workbook["Key Residue Coverage"][1]
+    ]
+    assert "distinct_key_residue_count" in coverage_headers
+    assert "key_residue_coverage" in coverage_headers
+    assert "raw_key_pair_count" in coverage_headers
     assert all(
         cell.data_type != "f"
         for sheet in workbook.worksheets
         for row in sheet.iter_rows()
         for cell in row
     )
+    parameters = dict(
+        workbook["Parameters"].iter_rows(
+            min_row=2,
+            values_only=True,
+        )
+    )
+    assert parameters["schema_version"] == "3"
 
 
 def test_filtered_export_recomputes_all_derived_views(fixture_path):
@@ -244,10 +258,16 @@ def test_csv_neutralizes_all_formula_prefixes(fixture_path, tmp_path, prefix):
         details=tuple(replace(item, source_file=prefix) for item in result.details),
     )
 
-    summary_path, detail_path = export.export_csv(result, tmp_path / "safe")
+    paths = {
+        Path(path).name: Path(path)
+        for path in export.export_csv(result, tmp_path / "safe")
+    }
 
-    assert pd.read_csv(summary_path).loc[0, "source_file"].startswith("'")
-    assert pd.read_csv(detail_path).loc[0, "source_file"].startswith("'")
+    assert pd.read_csv(paths["safe_summary.csv"]).loc[0, "source_file"].startswith("'")
+    assert pd.read_csv(paths["safe_detail.csv"]).loc[0, "source_file"].startswith("'")
+    assert (
+        pd.read_csv(paths["safe_key_residue_coverage.csv"]).loc[0, "source_file"].startswith("'")
+    )
 
 
 def test_water_bridge_fields_are_serialized_into_detail_and_matrix(
@@ -284,6 +304,7 @@ def test_qc_only_workbook_is_exportable(fixture_path, tmp_path):
     assert workbook.sheetnames == [
         "Summary",
         "Residue Matrix",
+        "Key Residue Coverage",
         "Detail",
         "Parameters",
         "Input QC",
@@ -297,6 +318,11 @@ def test_csv_and_xlsx_accept_pathlike(fixture_path, tmp_path):
 
     paths = export.export_csv(result, tmp_path / "out")
     assert all(Path(path).is_file() for path in paths)
+    assert sorted(Path(path).name for path in paths) == [
+        "out_detail.csv",
+        "out_key_residue_coverage.csv",
+        "out_summary.csv",
+    ]
     assert Path(export.export_xlsx(result, tmp_path / "out.xlsx")).is_file()
 
 
@@ -305,5 +331,6 @@ def test_run_captures_cutoffs_without_mutating_global_state(fixture_path):
 
     result = br.run([fixture_path("minimal_complex.pdb")], hbond_preset="dsv")
 
-    assert dict(result.parameters.cutoffs)["hbond_dist"] == 3.5
+    assert dict(result.parameters.cutoffs)["hbond_dist"] == 4.1
+    assert dict(result.parameters.cutoffs)["hbond_h_a_dist"] == 3.1
     assert dict(CUTOFFS) == original

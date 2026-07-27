@@ -132,5 +132,5 @@ def parse_sol(filename: str):
     """Return the integer N from a 'sol<N>' token in the filename, or None."""
     import re
 
-    m = re.search(r"sol(\d+)", filename, flags=re.IGNORECASE)
+    m = re.search(r"sol(\d+)", str(filename), flags=re.IGNORECASE)
     return int(m.group(1)) if m else None

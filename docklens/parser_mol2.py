@@ -9,6 +9,7 @@ and @<TRIPOS>SET (CCDC_LIGAND / CCDC_AMINOACID serial lists). Returns one
 
 from __future__ import annotations
 
+import math
 import re
 
 from .interaction_core import Atom
@@ -61,8 +62,9 @@ def _parse_set_block(lines, start_idx):
 
 def _parse_one_molecule(block_lines, source_file):
     section = None
-    atom_rows = []  # (serial, name, x, y, z, sybyl, subst_id, subst_name)
-    bonds = []  # (a1, a2)
+    # serial, name, xyz, SYBYL type, substructure, partial charge
+    atom_rows = []
+    bonds = []  # (a1, a2, MOL2 bond type)
     chain_by_subst = {}  # subst_id -> chain
     group_subst = {}  # subst_id -> 'RESIDUE'/'GROUP'
     group_info = {}  # subst_id -> raw info string (for GROUP naming)
@@ -90,14 +92,34 @@ def _parse_one_molecule(block_lines, source_file):
                 sybyl = t[5]
                 subst_id = int(t[6]) if len(t) >= 7 else 0
                 subst_name = t[7] if len(t) >= 8 else ""
-                atom_rows.append((serial, name, x, y, z, sybyl, subst_id, subst_name))
+                partial_charge = None
+                if len(t) >= 9:
+                    try:
+                        candidate_charge = float(t[8])
+                        if math.isfinite(candidate_charge):
+                            partial_charge = candidate_charge
+                    except ValueError:
+                        pass
+                atom_rows.append(
+                    (
+                        serial,
+                        name,
+                        x,
+                        y,
+                        z,
+                        sybyl,
+                        subst_id,
+                        subst_name,
+                        partial_charge,
+                    )
+                )
             i += 1
             continue
 
         if section == "BOND":
             t = s.split()
             if len(t) >= 4:
-                bonds.append((int(t[1]), int(t[2])))
+                bonds.append((int(t[1]), int(t[2]), t[3].strip().lower()))
             i += 1
             continue
 
@@ -137,9 +159,17 @@ def _parse_one_molecule(block_lines, source_file):
     # build Atom objects
     atoms = []
     atom_by_serial = {}
-    for idx, (serial, name, x, y, z, sybyl, subst_id, subst_name) in enumerate(
-        atom_rows
-    ):
+    for idx, (
+        serial,
+        name,
+        x,
+        y,
+        z,
+        sybyl,
+        subst_id,
+        subst_name,
+        partial_charge,
+    ) in enumerate(atom_rows):
         elem = _element_from_sybyl(sybyl)
         resn, resi = _split_resn_resi(subst_name, subst_id)
         chain = chain_by_subst.get(subst_id, "")
@@ -154,15 +184,19 @@ def _parse_one_molecule(block_lines, source_file):
             fcharge=0,  # mol2 stores partial charges only; no formal charge
             serial=serial,
             subst_id=subst_id,
+            sybyl_type=sybyl,
+            partial_charge=partial_charge,
         )
         atoms.append(a)
         atom_by_serial[serial] = a
 
-    for a1, a2 in bonds:
+    for a1, a2, bond_type in bonds:
         u, v = atom_by_serial.get(a1), atom_by_serial.get(a2)
         if u is not None and v is not None:
             u.neighbors.append(v)
             v.neighbors.append(u)
+            u.bond_orders[v.idx] = bond_type
+            v.bond_orders[u.idx] = bond_type
 
     pose = ParsedPose(
         atoms=atoms,

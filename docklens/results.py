@@ -6,6 +6,9 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Mapping, Optional, Tuple
 
+from .analysis_profiles import VALID_ANALYSIS_PROFILES, normalize_analysis_profile
+from .residue_keys import normalize_key_residues
+
 
 @dataclass(frozen=True)
 class Endpoint:
@@ -46,6 +49,14 @@ class Detail:
     receptor_water_distance_A: Optional[float] = None
     ligand_water_distance_A: Optional[float] = None
     water_angle_deg: Optional[float] = None
+    chemistry_basis: str = ""
+    chemistry_confidence: str = ""
+    hydrogen_atom: str = ""
+    hydrogen_atom_serial: Optional[int] = None
+    hydrogen_acceptor_distance_A: Optional[float] = None
+    donor_hydrogen_acceptor_angle_deg: Optional[float] = None
+    hydrogen_acceptor_base_angle_deg: Optional[float] = None
+    theta_deg: Optional[float] = None
 
     @property
     def ligand_atom(self) -> str:
@@ -108,7 +119,7 @@ class InputQC:
 
 @dataclass(frozen=True)
 class AnalysisParameters:
-    schema_version: str = "2"
+    schema_version: str = "3"
     app_version: str = ""
     started_at: str = ""
     hbond_preset: str = "plip"
@@ -125,12 +136,21 @@ class ExportFilter:
     text: str = ""
     key_only: bool = False
     matrix_mode: str = "count"
+    analysis_profile: str = "complete"
 
     def __post_init__(self):
         if self.scope not in {"all", "filtered"}:
             raise ValueError("scope must be 'all' or 'filtered'")
         if self.matrix_mode not in {"count", "presence"}:
             raise ValueError("matrix_mode must be 'count' or 'presence'")
+        if self.analysis_profile not in VALID_ANALYSIS_PROFILES:
+            raise ValueError(
+                "analysis_profile must be one of %s"
+                % ", ".join(VALID_ANALYSIS_PROFILES)
+            )
+        object.__setattr__(
+            self, "analysis_profile", normalize_analysis_profile(self.analysis_profile)
+        )
 
 
 @dataclass(frozen=True)
@@ -166,9 +186,7 @@ def make_result(
 
 
 def _normalise_keys(items) -> frozenset:
-    if isinstance(items, str):
-        items = items.replace(",", " ").split()
-    return frozenset(str(item).strip().upper() for item in items if str(item).strip())
+    return normalize_key_residues(items)
 
 
 def with_key_residues(result: RunResult, key_residues) -> RunResult:

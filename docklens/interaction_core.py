@@ -1,19 +1,18 @@
 """
 interaction_core.py — PyMOL-independent non-covalent interaction detection.
 
-Ported verbatim (geometry + cutoffs unchanged) from the PyMOL plugin
-``interactions_plugin.py``. The ONLY differences from the plugin are:
+The legacy PLIP branch is ported from the PyMOL plugin
+``interactions_plugin.py`` so historical results remain reproducible. The
+chemistry-aware strict branch adds explicit-hydrogen geometry and interaction
+types that are intentionally separate from the legacy behavior.
 
   * ``Atom`` is built from plain fields (not a PyMOL chempy atom) and gains
     parser/UI bookkeeping fields (serial, subst_id, side).
   * ``Atom.res_sele()`` (the only PyMOL-coupled method) is removed; ``res_tag``
     and ``label`` are kept.
-  * Interaction dicts carry the endpoint objects (``a_obj``/``b_obj``) instead
+  * Interaction dictionaries carry endpoint objects (``a_obj``/``b_obj``) instead
     of PyMOL selection strings (``a_sele``/``b_sele``), so the desktop tool can
-    resolve ligand vs. receptor side per endpoint. No cutoff or geometric test
-    is altered.
-
-Results are therefore checkable against the PyMOL plugin.
+    resolve ligand vs. receptor side per endpoint.
 """
 
 from __future__ import annotations
@@ -53,6 +52,7 @@ INTERACTION_COLORS = {
     "water_bridge": ("skyblue", "Water-mediated H-bond"),
     "pi_sulfur": ("reddishpurple", "pi-sulfur"),
     "pi_anion": ("yellow", "pi-anion"),
+    "pi_lone_pair": ("skyblue", "Lone pair-pi"),
 }
 
 
@@ -64,7 +64,7 @@ def color_hex(itype: str) -> str:
 
 
 # ===========================================================================
-# Geometric cutoffs — COPIED VERBATIM from interactions_plugin.py (do not edit)
+# Geometric cutoffs: legacy defaults plus separately gated strict criteria.
 # ===========================================================================
 #
 # Sources:
@@ -100,10 +100,9 @@ CUTOFFS = {
 
 _CUTOFF_DEFAULTS = dict(CUTOFFS)
 
-# H-bond criteria presets. 'plip' = shipped defaults (permissive, matches the
-# PyMOL plugin). 'dsv' = Discovery-Studio-like (stricter distance/angle) so the
-# H-bond count lines up with Discovery Studio Visualizer. Only the H-bond and
-# carbon-H-bond distance/angle keys are affected; all other cutoffs are untouched.
+# ``plip`` preserves shipped behavior. ``dsv`` is an initial calibration
+# against two explicitly protonated Discovery Studio reference complexes; it
+# remains a beta scientific profile until the corpus expands.
 HBOND_PRESETS = {
     "plip": {
         "hbond_dist": _CUTOFF_DEFAULTS["hbond_dist"],
@@ -112,21 +111,30 @@ HBOND_PRESETS = {
         "carbon_hbond_angle": _CUTOFF_DEFAULTS["carbon_hbond_angle"],
     },
     "dsv": {
-        "hbond_dist": 3.5,
-        "hbond_angle": 120.0,
-        "carbon_hbond_dist": 3.5,
+        # Heavy-atom distance is only a broad prefilter. Explicit-H evidence
+        # is evaluated using the H...A distance plus DHA and HAY angles.
+        "hbond_dist": 4.1,
+        "hbond_angle": 90.0,
+        "hbond_h_a_dist": 3.1,
+        "hbond_acceptor_angle": 90.0,
+        "hbond_inferred_dist": 3.5,
+        "carbon_hbond_dist": 4.1,
         "carbon_hbond_angle": 120.0,
+        "carbon_hbond_h_a_dist": 2.5,
+        "carbon_hbond_acceptor_angle": 90.0,
+        "carbon_hbond_inferred_dist": 3.5,
+        "pi_lone_pair_dist": 3.5,
+        "pi_lone_pair_angle": 30.0,
     },
 }
 
 
 def apply_hbond_preset(name):
-    """Switch the H-bond distance/angle cutoffs to a named preset in-place.
-
-    Does NOT alter any non-H-bond cutoff. Unknown names are ignored.
-    """
+    """Reset globals and apply one named analysis profile in-place."""
     preset = HBOND_PRESETS.get(str(name).lower())
     if preset:
+        CUTOFFS.clear()
+        CUTOFFS.update(_CUTOFF_DEFAULTS)
         CUTOFFS.update(preset)
 
 
@@ -139,6 +147,9 @@ def cutoffs_for_preset(name):
 
 _ACTIVE_CUTOFFS = ContextVar(
     "docklens_active_cutoffs", default=MappingProxyType(dict(CUTOFFS))
+)
+_ACTIVE_CHEMISTRY_PROFILE = ContextVar(
+    "docklens_active_chemistry_profile", default="plip"
 )
 
 
@@ -217,7 +228,8 @@ def _proj_offset(point, plane_point, normal):
 
 class Atom(object):
     """Lightweight atom. Geometry-relevant fields match the plugin's Atom;
-    `serial`, `subst_id` and `side` are parser/UI bookkeeping."""
+    parser-provided chemistry fields are optional so non-MOL2 formats and
+    callers from older releases retain their previous behaviour."""
 
     __slots__ = (
         "idx",
@@ -233,6 +245,9 @@ class Atom(object):
         "serial",
         "subst_id",
         "side",
+        "sybyl_type",
+        "partial_charge",
+        "bond_orders",
     )
 
     def __init__(
@@ -248,6 +263,8 @@ class Atom(object):
         fcharge=0,
         serial=None,
         subst_id=None,
+        sybyl_type="",
+        partial_charge=None,
     ):
         self.idx = idx
         self.elem = (elem or (name[:1] if name else "")).strip().capitalize()
@@ -265,6 +282,15 @@ class Atom(object):
         self.serial = serial
         self.subst_id = subst_id
         self.side = None  # 'receptor' | 'ligand' | 'water', set before classify
+        self.sybyl_type = (sybyl_type or "").strip()
+        try:
+            self.partial_charge = (
+                float(partial_charge) if partial_charge is not None else None
+            )
+        except (TypeError, ValueError):
+            self.partial_charge = None
+        # neighbor atom index -> raw, normalized MOL2 bond type
+        self.bond_orders = {}
 
     # --- kept from the plugin ---
     def res_tag(self):
@@ -344,6 +370,7 @@ _CATION_RES_ATOMS = {
     "ARG": ["NH1", "NH2", "NE"],
     "HIS": ["ND1", "NE2"],
     "HIP": ["ND1", "NE2"],
+    "HSP": ["ND1", "NE2"],
 }
 _ANION_RES_ATOMS = {
     "ASP": ["OD1", "OD2"],
@@ -360,7 +387,138 @@ def _h_neighbors(atom):
     return [n for n in atom.neighbors if n.elem == "H"]
 
 
-def classify(atoms, rings, has_h):
+_CHEM_NON_ACCEPTOR_SYBYL = {"n.am", "n.4", "n.pl3"}
+_CHEM_NON_DONOR_SYBYL = {"o.2", "o.co2"}
+_PROTEIN_NON_ACCEPTOR = {
+    ("ARG", "NE"),
+    ("ARG", "NH1"),
+    ("ARG", "NH2"),
+    ("ASN", "ND2"),
+    ("GLN", "NE2"),
+    ("LYS", "NZ"),
+}
+_PROTEIN_NON_DONOR_OXYGEN = {
+    ("ASP", "OD1"),
+    ("ASP", "OD2"),
+    ("GLU", "OE1"),
+    ("GLU", "OE2"),
+}
+_PROTEIN_HYDROXYL_DONORS = {
+    ("SER", "OG"),
+    ("THR", "OG1"),
+    ("TYR", "OH"),
+}
+
+
+def _sybyl(atom):
+    return atom.sybyl_type.lower()
+
+
+def _heavy_neighbors(atom):
+    return [neighbor for neighbor in atom.neighbors if neighbor.elem != "H"]
+
+
+def _ring_has_aromatic_evidence(ring):
+    """Require MOL2 aromatic typing/bonds for strict pi interactions."""
+    members = tuple(ring.atoms)
+    member_ids = {atom.idx for atom in members}
+    typed_aromatic = all(_sybyl(atom) in {"c.ar", "n.ar"} for atom in members)
+    bonded_aromatic = all(
+        sum(
+            str(atom.bond_orders.get(neighbor.idx, "")).lower() == "ar"
+            for neighbor in atom.neighbors
+            if neighbor.idx in member_ids
+        )
+        >= 2
+        for atom in members
+    )
+    return typed_aromatic or bonded_aromatic
+
+
+def _strict_group_is_cationic(resname, atoms):
+    """Avoid assigning a positive centre to neutral histidine."""
+    if resname != "HIS":
+        return True
+    if any(atom.fcharge > 0 for atom in atoms):
+        return True
+    return len(atoms) >= 2 and all(_h_neighbors(atom) for atom in atoms)
+
+
+_BOND_ORDER_VALUES = {
+    "1": 1.0,
+    "2": 2.0,
+    "3": 3.0,
+    "ar": 1.5,
+    "am": 1.0,
+}
+
+
+def _heavy_bond_order_sum(atom):
+    total = 0.0
+    for neighbor in _heavy_neighbors(atom):
+        raw_order = str(atom.bond_orders.get(neighbor.idx, "1")).lower()
+        total += _BOND_ORDER_VALUES.get(raw_order, 1.0)
+    return total
+
+
+def _chemistry_aware_acceptor(atom):
+    """Conservative acceptor policy based on retained topology/atom types."""
+    if atom.elem not in _HB_ACCEPTOR_ELEMS or atom.fcharge > 0:
+        return False
+    sybyl = _sybyl(atom)
+    if sybyl in _CHEM_NON_ACCEPTOR_SYBYL:
+        return False
+    if sybyl == "o.3" and _h_neighbors(atom):
+        return False
+    if atom.elem == "N":
+        residue_atom = (atom.resn.upper(), atom.name.upper())
+        if atom.name.upper() == "N" or residue_atom in _PROTEIN_NON_ACCEPTOR:
+            return False
+    return True
+
+
+def _chemistry_aware_donor(atom, allow_inferred_hydrogen=True):
+    """Whether an N/O atom can carry a donor hydrogen.
+
+    Explicit hydrogens are authoritative except on carbonyl/carboxylate
+    oxygens. Without explicit H, only chemically unsaturated environments are
+    admitted. This decision is deliberately per atom: an unrelated hydrogen
+    elsewhere in the complex does not change it.
+    """
+    if atom.elem not in _HB_DONOR_ELEMS:
+        return False
+    sybyl = _sybyl(atom)
+    if sybyl in _CHEM_NON_DONOR_SYBYL:
+        return False
+    if _h_neighbors(atom):
+        return True
+    if not allow_inferred_hydrogen:
+        return False
+
+    heavy = _heavy_neighbors(atom)
+    residue_atom = (atom.resn.upper(), atom.name.upper())
+    if atom.elem == "O":
+        if residue_atom in _PROTEIN_NON_DONOR_OXYGEN:
+            return False
+        # O.3 with zero/one heavy neighbor can be an alcohol/phenol donor.
+        # The same valence rule is a conservative fallback for PDB/PDBQT.
+        available_valence = len(heavy) <= 1 and _heavy_bond_order_sum(atom) <= 1.0
+        return (sybyl == "o.3" and available_valence) or (
+            not sybyl
+            and available_valence
+            and residue_atom in _PROTEIN_HYDROXYL_DONORS
+        )
+
+    # Aromatic/pyridine-like and nitrile nitrogens need an explicit hydrogen
+    # to be treated as donors. Quaternary nitrogens cannot accept an inferred H.
+    if sybyl in {"n.1", "n.2", "n.ar", "n.4"}:
+        return False
+    if atom.resn.upper() == "PRO" and atom.name.upper() == "N":
+        return False
+    return len(heavy) < 3 and _heavy_bond_order_sum(atom) < 3.0
+
+
+def classify(atoms, rings, has_h, chemistry_profile="plip"):
     """Return a dict of feature lists for one molecular side. Ported.
 
     The only change from the plugin: charged-centre tuples carry the
@@ -378,6 +536,8 @@ def classify(atoms, rings, has_h):
     alkyl_carbons = []
     metals = []
     sulfurs = []
+    chemistry_aware = str(chemistry_profile).strip().lower() == "dsv"
+    side_has_explicit_hydrogens = any(atom.elem == "H" for atom in atoms)
 
     # charged centres from formal charge
     for a in atoms:
@@ -395,6 +555,8 @@ def classify(atoms, rings, has_h):
         if a.resn in _ANION_RES_ATOMS and a.name in _ANION_RES_ATOMS[a.resn]:
             grouped_anion.setdefault((a.res_tag(), a.resn), []).append(a)
     for (res, resn), grp in grouped_cation.items():
+        if chemistry_aware and not _strict_group_is_cationic(resn, grp):
+            continue
         pt = _centroid([x.coord for x in grp])
         lbl = "%s_guan" % res if resn == "ARG" else "%s_%s" % (res, grp[0].name)
         cations.append((pt, lbl, grp[0]))
@@ -402,22 +564,78 @@ def classify(atoms, rings, has_h):
         pt = _centroid([x.coord for x in grp])
         anions.append((pt, "%s_carboxyl" % res, grp[0]))
 
+    # MOL2 partial charges are not formal charges, but selected SYBYL types
+    # encode formal ionic states unambiguously enough for grouped centres.
+    if chemistry_aware:
+        grouped_cation_atoms = {
+            atom.idx for group in grouped_cation.values() for atom in group
+        }
+        grouped_anion_atoms = {
+            atom.idx for group in grouped_anion.values() for atom in group
+        }
+        for atom in atoms:
+            if (
+                _sybyl(atom) == "n.4"
+                and atom.fcharge <= 0
+                and atom.idx not in grouped_cation_atoms
+            ):
+                cations.append((atom.coord, atom.label(), atom))
+
+        sybyl_carboxylates = {}
+        for atom in atoms:
+            if (
+                _sybyl(atom) != "o.co2"
+                or atom.fcharge < 0
+                or atom.idx in grouped_anion_atoms
+            ):
+                continue
+            carbon_neighbors = [
+                neighbor for neighbor in _heavy_neighbors(atom)
+                if neighbor.elem == "C"
+            ]
+            group_key = (
+                ("carbon", carbon_neighbors[0].idx)
+                if carbon_neighbors
+                else ("oxygen", atom.idx)
+            )
+            sybyl_carboxylates.setdefault(group_key, []).append(atom)
+        for group in sybyl_carboxylates.values():
+            point = _centroid([atom.coord for atom in group])
+            anions.append(
+                (point, "%s_carboxylate" % group[0].res_tag(), group[0])
+            )
+
     # H-bond donors/acceptors, halogens, alkyl carbons, metals, sulfurs
     for a in atoms:
-        if a.elem in _HB_ACCEPTOR_ELEMS:
-            if not (a.elem == "N" and a.fcharge > 0):
+        if chemistry_aware:
+            if _chemistry_aware_acceptor(a):
                 acceptors.append(a)
-        if a.elem in _HB_DONOR_ELEMS:
-            if has_h:
+            if _chemistry_aware_donor(
+                a,
+                allow_inferred_hydrogen=not side_has_explicit_hydrogens,
+            ):
                 hs = _h_neighbors(a)
-                if hs:
-                    donors.append((a, hs))
-            else:
-                donors.append((a, []))
+                donors.append((a, hs))
+        else:
+            if a.elem in _HB_ACCEPTOR_ELEMS:
+                if not (a.elem == "N" and a.fcharge > 0):
+                    acceptors.append(a)
+            if a.elem in _HB_DONOR_ELEMS:
+                if has_h:
+                    hs = _h_neighbors(a)
+                    if hs:
+                        donors.append((a, hs))
+                else:
+                    donors.append((a, []))
         if a.elem == "C":
             if has_h:
                 hs = _h_neighbors(a)
-                if hs:
+                heavy_neighbors = _heavy_neighbors(a)
+                polarized = any(
+                    neighbor.elem in {"N", "O", "S", "F", "Cl", "Br", "I"}
+                    for neighbor in heavy_neighbors
+                )
+                if hs and (not chemistry_aware or polarized):
                     carbon_donors.append((a, hs))
             if a.idx not in ring_atom_ids:
                 heavy = [n for n in a.neighbors if n.elem != "H"]
@@ -490,10 +708,71 @@ def _hbond_pairs(feat_a, feat_b, itype, dist_cut, angle_cut, has_h):
             d = _dist(donor.coord, acc.coord)
             if d > dist_cut:
                 continue
-            if has_h and hs:
+            chemistry_aware = _ACTIVE_CHEMISTRY_PROFILE.get() == "dsv"
+            if chemistry_aware and hs:
+                cutoffs = _active_cutoffs()
+                prefix = "hbond" if itype == "hbond" else "carbon_hbond"
+                acceptor_bases = [
+                    neighbor for neighbor in acc.neighbors if neighbor.elem != "H"
+                ]
+                if not acceptor_bases:
+                    continue
+                for hydrogen in hs:
+                    hydrogen_distance = _dist(hydrogen.coord, acc.coord)
+                    if hydrogen_distance > cutoffs[f"{prefix}_h_a_dist"]:
+                        continue
+                    donor_angle = _angle_at(
+                        hydrogen.coord,
+                        donor.coord,
+                        acc.coord,
+                    )
+                    if donor_angle < angle_cut:
+                        continue
+                    acceptor_angle = max(
+                        _angle_at(
+                            acc.coord,
+                            hydrogen.coord,
+                            base.coord,
+                        )
+                        for base in acceptor_bases
+                    )
+                    if acceptor_angle < cutoffs[f"{prefix}_acceptor_angle"]:
+                        continue
+                    out.append(
+                        _mk(
+                            itype,
+                            "",
+                            donor.label(),
+                            acc.label(),
+                            donor.coord,
+                            acc.coord,
+                            donor,
+                            acc,
+                            "donor",
+                            "acceptor",
+                            chemistry_basis="explicit_hydrogen",
+                            confidence="high",
+                            hydrogen_obj=hydrogen,
+                            hydrogen_acceptor_distance=hydrogen_distance,
+                            donor_hydrogen_acceptor_angle=donor_angle,
+                            hydrogen_acceptor_base_angle=acceptor_angle,
+                        )
+                    )
+                continue
+            if chemistry_aware and not hs:
+                prefix = "hbond" if itype == "hbond" else "carbon_hbond"
+                if d > _active_cutoffs()[f"{prefix}_inferred_dist"]:
+                    continue
+            if not chemistry_aware and has_h and hs:
                 best = max(_angle_at(h.coord, donor.coord, acc.coord) for h in hs)
                 if best < angle_cut:
                     continue
+            chemistry_metadata = {}
+            if chemistry_aware:
+                chemistry_metadata = {
+                    "chemistry_basis": "inferred_hydrogen",
+                    "confidence": "medium",
+                }
             out.append(
                 _mk(
                     itype,
@@ -506,6 +785,7 @@ def _hbond_pairs(feat_a, feat_b, itype, dist_cut, angle_cut, has_h):
                     acc,
                     "donor",
                     "acceptor",
+                    **chemistry_metadata,
                 )
             )
     return out
@@ -717,6 +997,51 @@ def detect_pi_anion(fa, fb):
     return out
 
 
+def detect_pi_lone_pair(fa, fb):
+    """Detect a lone-pair atom aligned over the face of an aromatic ring."""
+    if _ACTIVE_CHEMISTRY_PROFILE.get() != "dsv":
+        return []
+    cutoffs = _active_cutoffs()
+    out = []
+    for acceptors, rings in (
+        (fa["acceptors"], fb["rings"]),
+        (fb["acceptors"], fa["rings"]),
+    ):
+        for acceptor in acceptors:
+            for ring in rings:
+                if not _ring_has_aromatic_evidence(ring):
+                    continue
+                distance = _dist(acceptor.coord, ring.centroid)
+                if distance > cutoffs["pi_lone_pair_dist"]:
+                    continue
+                direction = _v(acceptor.coord) - _v(ring.centroid)
+                norm = np.linalg.norm(direction)
+                if norm < 1e-6:
+                    continue
+                cosine = abs(
+                    np.clip((direction / norm).dot(_v(ring.normal)), -1.0, 1.0)
+                )
+                theta = float(np.degrees(np.arccos(cosine)))
+                if theta > cutoffs["pi_lone_pair_angle"]:
+                    continue
+                out.append(
+                    _mk(
+                        "pi_lone_pair",
+                        "lone-pair/pi",
+                        acceptor.label(),
+                        ring.tag,
+                        acceptor.coord,
+                        ring.centroid,
+                        acceptor,
+                        ring,
+                        "lone_pair",
+                        "pi_orbitals",
+                        theta=theta,
+                    )
+                )
+    return out
+
+
 def detect_water_bridge(fa, fb, waters):
     """Return one semantic receptor-water-ligand record per bridge."""
     c = _active_cutoffs()
@@ -784,6 +1109,7 @@ DETECTORS = {
     "metal": lambda fa, fb, h: detect_metal(fa, fb),
     "pi_sulfur": lambda fa, fb, h: detect_pi_sulfur(fa, fb),
     "pi_anion": lambda fa, fb, h: detect_pi_anion(fa, fb),
+    "pi_lone_pair": lambda fa, fb, h: detect_pi_lone_pair(fa, fb),
     # water_bridge handled separately (needs the water list)
 }
 
@@ -814,16 +1140,28 @@ def endpoint_name(obj):
 
 
 def compute_interactions(
-    receptor_atoms, ligand_atoms, waters=None, types=None, cutoffs=None
+    receptor_atoms,
+    ligand_atoms,
+    waters=None,
+    types=None,
+    cutoffs=None,
+    chemistry_profile="plip",
 ):
     """Detect all requested interactions between receptor and ligand.
 
     Atoms must already have `.side` set ('receptor'/'ligand'/'water'). Returns a
     list of interaction dicts, each with an added 'dist' (endpoint separation).
     """
-    token = _ACTIVE_CUTOFFS.set(
-        MappingProxyType(dict(cutoffs if cutoffs is not None else CUTOFFS))
+    chemistry_profile = str(chemistry_profile).strip().lower()
+    if chemistry_profile not in HBOND_PRESETS:
+        raise ValueError("Unknown chemistry profile: %s" % chemistry_profile)
+    effective_cutoffs = dict(
+        cutoffs
+        if cutoffs is not None
+        else cutoffs_for_preset(chemistry_profile)
     )
+    cutoff_token = _ACTIVE_CUTOFFS.set(MappingProxyType(effective_cutoffs))
+    chemistry_token = _ACTIVE_CHEMISTRY_PROFILE.set(chemistry_profile)
     try:
         waters = waters or []
         req = list(types) if types else list(VALID_TYPES)
@@ -833,8 +1171,18 @@ def compute_interactions(
         # the documented heavy-atom distance fallback applies to both sides.
         has_h = any(a.elem == "H" for a in (*receptor_atoms, *ligand_atoms))
 
-        feat_r = classify(receptor_atoms, _build_rings(receptor_atoms), has_h)
-        feat_l = classify(ligand_atoms, _build_rings(ligand_atoms), has_h)
+        feat_r = classify(
+            receptor_atoms,
+            _build_rings(receptor_atoms),
+            has_h,
+            chemistry_profile=chemistry_profile,
+        )
+        feat_l = classify(
+            ligand_atoms,
+            _build_rings(ligand_atoms),
+            has_h,
+            chemistry_profile=chemistry_profile,
+        )
 
         inters = []
         for itype in req:
@@ -846,4 +1194,5 @@ def compute_interactions(
             it["dist"] = _dist(it["a_point"], it["b_point"])
         return inters
     finally:
-        _ACTIVE_CUTOFFS.reset(token)
+        _ACTIVE_CHEMISTRY_PROFILE.reset(chemistry_token)
+        _ACTIVE_CUTOFFS.reset(cutoff_token)
