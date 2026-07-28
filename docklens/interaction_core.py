@@ -46,12 +46,14 @@ INTERACTION_COLORS = {
     "pipi": ("reddishpurple", "pi-pi stacking (sandwich/T-shaped)"),
     "pication": ("yellow", "pi-cation"),
     "pialkyl": ("orange", "pi-alkyl"),
+    "pi_sigma": ("reddishpurple", "pi-sigma"),
     "alkyl": ("blue", "Alkyl-alkyl (hydrophobic)"),
     "halogen": ("black", "Halogen bond"),
     "metal": ("vermillion", "Metal coordination"),
     "water_bridge": ("skyblue", "Water-mediated H-bond"),
     "pi_sulfur": ("reddishpurple", "pi-sulfur"),
     "pi_anion": ("yellow", "pi-anion"),
+    "pi_donor_hbond": ("bluishgreen", "pi-donor hydrogen bond"),
     "pi_lone_pair": ("skyblue", "Lone pair-pi"),
 }
 
@@ -84,7 +86,7 @@ CUTOFFS = {
     "pipi_angle_dev": 30.0,
     "pication_dist": 6.0,
     "pication_offset": 2.0,
-    "pialkyl_dist": 5.0,  # UNCERTAIN
+    "pialkyl_dist": 5.0,  # legacy profile
     "alkyl_dist": 4.0,
     "halogen_dist": 4.0,
     "halogen_angle": 135.0,
@@ -93,6 +95,14 @@ CUTOFFS = {
     "water_bridge_max": 4.1,
     "water_bridge_angle_min": 75.0,
     "water_bridge_angle_max": 140.0,
+    "pi_sigma_carbon_dist": 4.5,
+    "pi_sigma_h_centroid_dist": 4.3,
+    "pi_sigma_axis_angle": 40.0,
+    "pi_sigma_dha_angle": 160.0,
+    "pi_donor_dist": 5.2,
+    "pi_donor_h_centroid_dist": 4.1,
+    "pi_donor_axis_angle": 45.0,
+    "pi_donor_dha_angle": 145.0,
     "pi_sulfur_dist": 5.3,  # UNCERTAIN
     "pi_anion_dist": 5.0,  # UNCERTAIN
     "pi_anion_offset": 2.0,
@@ -100,9 +110,9 @@ CUTOFFS = {
 
 _CUTOFF_DEFAULTS = dict(CUTOFFS)
 
-# ``plip`` preserves shipped behavior. ``dsv`` is an initial calibration
-# against two explicitly protonated Discovery Studio reference complexes; it
-# remains a beta scientific profile until the corpus expands.
+# ``plip`` preserves shipped behavior. ``dsv`` is an empirical calibration
+# against explicitly protonated Discovery Studio references, including a
+# matched 150-pose 2m5d corpus; it remains a beta scientific profile.
 HBOND_PRESETS = {
     "plip": {
         "hbond_dist": _CUTOFF_DEFAULTS["hbond_dist"],
@@ -119,10 +129,17 @@ HBOND_PRESETS = {
         "hbond_acceptor_angle": 90.0,
         "hbond_inferred_dist": 3.5,
         "carbon_hbond_dist": 4.1,
-        "carbon_hbond_angle": 120.0,
-        "carbon_hbond_h_a_dist": 2.5,
+        "carbon_hbond_angle": 90.0,
+        "carbon_hbond_h_a_dist": 3.0,
         "carbon_hbond_acceptor_angle": 90.0,
         "carbon_hbond_inferred_dist": 3.5,
+        # The examples contain isolated hydrophobic contacts beyond 5 A, but
+        # widening these global thresholds sharply increases false positives
+        # over the matched 150-pose corpus. Keep the corpus-calibrated limits.
+        "pialkyl_dist": 4.9,
+        "alkyl_dist": 4.2,
+        "metal_dist": 3.0,
+        "pi_sulfur_dist": 5.3,
         "pi_lone_pair_dist": 3.5,
         "pi_lone_pair_angle": 30.0,
     },
@@ -435,6 +452,58 @@ def _ring_has_aromatic_evidence(ring):
     return typed_aromatic or bonded_aromatic
 
 
+_PROTEIN_RESIDUES = {
+    "ALA",
+    "ARG",
+    "ASN",
+    "ASP",
+    "CYS",
+    "GLN",
+    "GLU",
+    "GLY",
+    "HIS",
+    "ILE",
+    "LEU",
+    "LYS",
+    "MET",
+    "PHE",
+    "PRO",
+    "SER",
+    "THR",
+    "TRP",
+    "TYR",
+    "VAL",
+    "ASH",
+    "GLH",
+    "HID",
+    "HIE",
+    "HIP",
+    "HSP",
+    "CYM",
+    "CYX",
+}
+_PROTEIN_ALKYL_ATOMS = {
+    "ALA": {"CB"},
+    "VAL": {"CB", "CG1", "CG2"},
+    "LEU": {"CB", "CG", "CD1", "CD2"},
+    "ILE": {"CB", "CG1", "CG2", "CD1"},
+    "MET": {"CB", "CG", "CE"},
+    "PRO": {"CB", "CG", "CD"},
+    "CYS": {"CB"},
+    "CYM": {"CB"},
+    "CYX": {"CB"},
+}
+
+
+def _chemistry_aware_alkyl_carbon(atom):
+    """Recognize aliphatic groups without counting arbitrary protein C?/C?."""
+    residue = atom.resn.upper()
+    if residue in _PROTEIN_RESIDUES:
+        return atom.name.upper() in _PROTEIN_ALKYL_ATOMS.get(residue, set())
+    heavy = _heavy_neighbors(atom)
+    return bool(heavy) and all(neighbor.elem == "C" for neighbor in heavy)
+
+
 def _strict_group_is_cationic(resname, atoms):
     """Avoid assigning a positive centre to neutral histidine."""
     if resname != "HIS":
@@ -504,9 +573,7 @@ def _chemistry_aware_donor(atom, allow_inferred_hydrogen=True):
         # The same valence rule is a conservative fallback for PDB/PDBQT.
         available_valence = len(heavy) <= 1 and _heavy_bond_order_sum(atom) <= 1.0
         return (sybyl == "o.3" and available_valence) or (
-            not sybyl
-            and available_valence
-            and residue_atom in _PROTEIN_HYDROXYL_DONORS
+            not sybyl and available_valence and residue_atom in _PROTEIN_HYDROXYL_DONORS
         )
 
     # Aromatic/pyridine-like and nitrile nitrogens need an explicit hydrogen
@@ -530,6 +597,7 @@ def classify(atoms, rings, has_h, chemistry_profile="plip"):
     donors = []
     carbon_donors = []
     acceptors = []
+    sigma_donors = []
     cations = []  # (point, label, repr_atom)
     anions = []  # (point, label, repr_atom)
     halogens = []
@@ -590,8 +658,7 @@ def classify(atoms, rings, has_h, chemistry_profile="plip"):
             ):
                 continue
             carbon_neighbors = [
-                neighbor for neighbor in _heavy_neighbors(atom)
-                if neighbor.elem == "C"
+                neighbor for neighbor in _heavy_neighbors(atom) if neighbor.elem == "C"
             ]
             group_key = (
                 ("carbon", carbon_neighbors[0].idx)
@@ -601,9 +668,7 @@ def classify(atoms, rings, has_h, chemistry_profile="plip"):
             sybyl_carboxylates.setdefault(group_key, []).append(atom)
         for group in sybyl_carboxylates.values():
             point = _centroid([atom.coord for atom in group])
-            anions.append(
-                (point, "%s_carboxylate" % group[0].res_tag(), group[0])
-            )
+            anions.append((point, "%s_carboxylate" % group[0].res_tag(), group[0]))
 
     # H-bond donors/acceptors, halogens, alkyl carbons, metals, sulfurs
     for a in atoms:
@@ -637,10 +702,15 @@ def classify(atoms, rings, has_h, chemistry_profile="plip"):
                 )
                 if hs and (not chemistry_aware or polarized):
                     carbon_donors.append((a, hs))
+                if hs and _sybyl(a) in {"", "c.3"}:
+                    sigma_donors.append((a, hs))
             if a.idx not in ring_atom_ids:
-                heavy = [n for n in a.neighbors if n.elem != "H"]
-                if heavy and all(n.elem == "C" for n in heavy):
+                if chemistry_aware and _chemistry_aware_alkyl_carbon(a):
                     alkyl_carbons.append(a)
+                elif not chemistry_aware:
+                    heavy = [n for n in a.neighbors if n.elem != "H"]
+                    if heavy and all(n.elem == "C" for n in heavy):
+                        alkyl_carbons.append(a)
         if a.elem in _HALOGENS:
             cbonded = [n for n in a.neighbors if n.elem == "C"]
             if cbonded:
@@ -654,6 +724,7 @@ def classify(atoms, rings, has_h, chemistry_profile="plip"):
         "donors": donors,
         "carbon_donors": carbon_donors,
         "acceptors": acceptors,
+        "sigma_donors": sigma_donors,
         "cations": cations,
         "anions": anions,
         "halogens": halogens,
@@ -680,7 +751,7 @@ def _mk(
     b_obj,
     a_role="",
     b_role="",
-    **extra
+    **extra,
 ):
     record = {
         "type": itype,
@@ -818,8 +889,16 @@ def detect_saltbridge(fa, fb):
                 if _dist(cpt, apt) <= cut:
                     out.append(
                         _mk(
-                            "saltbridge", "", clbl, albl, cpt, apt, catom, aatom,
-                            "cation", "anion"
+                            "saltbridge",
+                            "",
+                            clbl,
+                            albl,
+                            cpt,
+                            apt,
+                            catom,
+                            aatom,
+                            "cation",
+                            "anion",
                         )
                     )
     return out
@@ -848,8 +927,16 @@ def detect_pipi(fa, fb):
                 continue
             out.append(
                 _mk(
-                    "pipi", subtype, r1.tag, r2.tag, r1.centroid, r2.centroid,
-                    r1, r2, "ring", "ring"
+                    "pipi",
+                    subtype,
+                    r1.tag,
+                    r2.tag,
+                    r1.centroid,
+                    r2.centroid,
+                    r1,
+                    r2,
+                    "ring",
+                    "ring",
                 )
             )
     return out
@@ -867,8 +954,16 @@ def detect_pication(fa, fb):
                     continue
                 out.append(
                     _mk(
-                        "pication", "", r.tag, clbl, r.centroid, cpt, r, catom,
-                        "ring", "cation"
+                        "pication",
+                        "",
+                        r.tag,
+                        clbl,
+                        r.centroid,
+                        cpt,
+                        r,
+                        catom,
+                        "ring",
+                        "cation",
                     )
                 )
     return out
@@ -877,17 +972,162 @@ def detect_pication(fa, fb):
 def detect_pialkyl(fa, fb):
     cut = _active_cutoffs()["pialkyl_dist"]
     out = []
+    best_by_group = {}
+    dsv_profile = _ACTIVE_CHEMISTRY_PROFILE.get() == "dsv"
     for rings, alks in ((fa["rings"], fb["alkyl"]), (fb["rings"], fa["alkyl"])):
         for r in rings:
             for a in alks:
-                if _dist(r.centroid, a.coord) <= cut:
-                    out.append(
-                        _mk(
-                            "pialkyl", "", r.tag, a.label(), r.centroid, a.coord,
-                            r, a, "ring", "alkyl"
-                        )
-                    )
+                distance = _dist(r.centroid, a.coord)
+                if distance > cut:
+                    continue
+                if dsv_profile and any(
+                    _pi_sigma_geometry(r, a, hydrogen) is not None
+                    for hydrogen in _h_neighbors(a)
+                ):
+                    continue
+                record = _mk(
+                    "pialkyl",
+                    "",
+                    r.tag,
+                    a.label(),
+                    r.centroid,
+                    a.coord,
+                    r,
+                    a,
+                    "ring",
+                    "alkyl",
+                )
+                if not dsv_profile:
+                    out.append(record)
+                    continue
+                # Use one closest contact per ring/residue pair for stable
+                # residue-level counting. The export retains its atom-level
+                # representative, avoiding combinatorial C--C duplicates.
+                group_key = (r.tag, a.res_tag())
+                previous = best_by_group.get(group_key)
+                if previous is None or distance < previous[0]:
+                    best_by_group[group_key] = (distance, record)
+    if dsv_profile:
+        out.extend(value[1] for value in best_by_group.values())
     return out
+
+
+def _axis_angle(point, centre, normal):
+    """Acute angle between a ring normal and a centroid-to-point vector."""
+    direction = _v(point) - _v(centre)
+    norm = np.linalg.norm(direction)
+    if norm < 1e-6:
+        return 90.0
+    cosine = abs(np.clip((direction / norm).dot(_v(normal)), -1.0, 1.0))
+    return float(np.degrees(np.arccos(cosine)))
+
+
+def _pi_sigma_geometry(ring, donor, hydrogen):
+    cutoffs = _active_cutoffs()
+    donor_distance = _dist(ring.centroid, donor.coord)
+    hydrogen_distance = _dist(ring.centroid, hydrogen.coord)
+    theta = _axis_angle(hydrogen.coord, ring.centroid, ring.normal)
+    donor_angle = _angle_at(hydrogen.coord, donor.coord, ring.centroid)
+    if donor_distance > cutoffs["pi_sigma_carbon_dist"]:
+        return None
+    if hydrogen_distance > cutoffs["pi_sigma_h_centroid_dist"]:
+        return None
+    if theta > cutoffs["pi_sigma_axis_angle"]:
+        return None
+    if donor_angle < cutoffs["pi_sigma_dha_angle"]:
+        return None
+    return donor_distance, hydrogen_distance, theta, donor_angle
+
+
+def detect_pi_sigma(fa, fb):
+    """Detect an axial C-H sigma bond directed toward an aromatic ring."""
+    if _ACTIVE_CHEMISTRY_PROFILE.get() != "dsv":
+        return []
+    best_by_pair = {}
+    for rings, donors in (
+        (fa["rings"], fb["sigma_donors"]),
+        (fb["rings"], fa["sigma_donors"]),
+    ):
+        for ring in rings:
+            for donor, hydrogens in donors:
+                for hydrogen in hydrogens:
+                    geometry = _pi_sigma_geometry(ring, donor, hydrogen)
+                    if geometry is None:
+                        continue
+                    donor_distance, hydrogen_distance, theta, donor_angle = geometry
+                    record = _mk(
+                        "pi_sigma",
+                        "C-H/pi",
+                        ring.tag,
+                        donor.label(),
+                        ring.centroid,
+                        donor.coord,
+                        ring,
+                        donor,
+                        "pi_orbitals",
+                        "sigma_donor",
+                        chemistry_basis="explicit_hydrogen",
+                        confidence="medium",
+                        hydrogen_obj=hydrogen,
+                        hydrogen_acceptor_distance=hydrogen_distance,
+                        donor_hydrogen_acceptor_angle=donor_angle,
+                        theta=theta,
+                    )
+                    key = (ring.tag, donor.idx)
+                    previous = best_by_pair.get(key)
+                    if previous is None or hydrogen_distance < previous[0]:
+                        best_by_pair[key] = (hydrogen_distance, record)
+    return [value[1] for value in best_by_pair.values()]
+
+
+def detect_pi_donor_hbond(fa, fb):
+    """Detect an N/O-H donor directed toward an aromatic pi system."""
+    if _ACTIVE_CHEMISTRY_PROFILE.get() != "dsv":
+        return []
+    cutoffs = _active_cutoffs()
+    best_by_pair = {}
+    for rings, donors in (
+        (fa["rings"], fb["donors"]),
+        (fb["rings"], fa["donors"]),
+    ):
+        for ring in rings:
+            for donor, hydrogens in donors:
+                for hydrogen in hydrogens:
+                    donor_distance = _dist(ring.centroid, donor.coord)
+                    hydrogen_distance = _dist(ring.centroid, hydrogen.coord)
+                    theta = _axis_angle(hydrogen.coord, ring.centroid, ring.normal)
+                    donor_angle = _angle_at(hydrogen.coord, donor.coord, ring.centroid)
+                    if donor_distance > cutoffs["pi_donor_dist"]:
+                        continue
+                    if hydrogen_distance > cutoffs["pi_donor_h_centroid_dist"]:
+                        continue
+                    if theta > cutoffs["pi_donor_axis_angle"]:
+                        continue
+                    if donor_angle < cutoffs["pi_donor_dha_angle"]:
+                        continue
+                    record = _mk(
+                        "pi_donor_hbond",
+                        "X-H/pi",
+                        ring.tag,
+                        donor.label(),
+                        ring.centroid,
+                        donor.coord,
+                        ring,
+                        donor,
+                        "pi_acceptor",
+                        "donor",
+                        chemistry_basis="explicit_hydrogen",
+                        confidence="medium",
+                        hydrogen_obj=hydrogen,
+                        hydrogen_acceptor_distance=hydrogen_distance,
+                        donor_hydrogen_acceptor_angle=donor_angle,
+                        theta=theta,
+                    )
+                    key = (ring.tag, donor.idx)
+                    previous = best_by_pair.get(key)
+                    if previous is None or hydrogen_distance < previous[0]:
+                        best_by_pair[key] = (hydrogen_distance, record)
+    return [value[1] for value in best_by_pair.values()]
 
 
 def detect_alkyl(fa, fb):
@@ -895,13 +1135,23 @@ def detect_alkyl(fa, fb):
     out = []
     for a in fa["alkyl"]:
         for b in fb["alkyl"]:
-            if _dist(a.coord, b.coord) <= cut:
-                out.append(
-                    _mk(
-                        "alkyl", "", a.label(), b.label(), a.coord, b.coord,
-                        a, b, "alkyl", "alkyl"
-                    )
+            distance = _dist(a.coord, b.coord)
+            if distance > cut:
+                continue
+            out.append(
+                _mk(
+                    "alkyl",
+                    "",
+                    a.label(),
+                    b.label(),
+                    a.coord,
+                    b.coord,
+                    a,
+                    b,
+                    "alkyl",
+                    "alkyl",
                 )
+            )
     return out
 
 
@@ -965,14 +1215,25 @@ def detect_metal(fa, fb):
 def detect_pi_sulfur(fa, fb):
     cut = _active_cutoffs()["pi_sulfur_dist"]
     out = []
+    dsv_profile = _ACTIVE_CHEMISTRY_PROFILE.get() == "dsv"
     for rings, sulfs in ((fa["rings"], fb["sulfurs"]), (fb["rings"], fa["sulfurs"])):
         for r in rings:
+            if dsv_profile and not _ring_has_aromatic_evidence(r):
+                continue
             for s in sulfs:
                 if _dist(r.centroid, s.coord) <= cut:
                     out.append(
                         _mk(
-                            "pi_sulfur", "", r.tag, s.label(), r.centroid, s.coord,
-                            r, s, "ring", "sulfur"
+                            "pi_sulfur",
+                            "",
+                            r.tag,
+                            s.label(),
+                            r.centroid,
+                            s.coord,
+                            r,
+                            s,
+                            "ring",
+                            "sulfur",
                         )
                     )
     return out
@@ -990,8 +1251,16 @@ def detect_pi_anion(fa, fb):
                     continue
                 out.append(
                     _mk(
-                        "pi_anion", "", r.tag, albl, r.centroid, apt, r, aatom,
-                        "ring", "anion"
+                        "pi_anion",
+                        "",
+                        r.tag,
+                        albl,
+                        r.centroid,
+                        apt,
+                        r,
+                        aatom,
+                        "ring",
+                        "anion",
                     )
                 )
     return out
@@ -1058,7 +1327,9 @@ def detect_water_bridge(fa, fb, waters):
                 (
                     "donor_acceptor"
                     if index in donors and index in acceptors
-                    else "donor" if index in donors else "acceptor"
+                    else "donor"
+                    if index in donors
+                    else "acceptor"
                 ),
             )
             for index in ordered_ids
@@ -1104,11 +1375,13 @@ DETECTORS = {
     "pipi": lambda fa, fb, h: detect_pipi(fa, fb),
     "pication": lambda fa, fb, h: detect_pication(fa, fb),
     "pialkyl": lambda fa, fb, h: detect_pialkyl(fa, fb),
+    "pi_sigma": lambda fa, fb, h: detect_pi_sigma(fa, fb),
     "alkyl": lambda fa, fb, h: detect_alkyl(fa, fb),
     "halogen": lambda fa, fb, h: detect_halogen(fa, fb),
     "metal": lambda fa, fb, h: detect_metal(fa, fb),
     "pi_sulfur": lambda fa, fb, h: detect_pi_sulfur(fa, fb),
     "pi_anion": lambda fa, fb, h: detect_pi_anion(fa, fb),
+    "pi_donor_hbond": lambda fa, fb, h: detect_pi_donor_hbond(fa, fb),
     "pi_lone_pair": lambda fa, fb, h: detect_pi_lone_pair(fa, fb),
     # water_bridge handled separately (needs the water list)
 }
@@ -1156,9 +1429,7 @@ def compute_interactions(
     if chemistry_profile not in HBOND_PRESETS:
         raise ValueError("Unknown chemistry profile: %s" % chemistry_profile)
     effective_cutoffs = dict(
-        cutoffs
-        if cutoffs is not None
-        else cutoffs_for_preset(chemistry_profile)
+        cutoffs if cutoffs is not None else cutoffs_for_preset(chemistry_profile)
     )
     cutoff_token = _ACTIVE_CUTOFFS.set(MappingProxyType(effective_cutoffs))
     chemistry_token = _ACTIVE_CHEMISTRY_PROFILE.set(chemistry_profile)

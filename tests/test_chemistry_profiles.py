@@ -144,9 +144,7 @@ def test_dsv_excludes_protonated_hydroxyl_from_acceptors():
 
 
 def test_dsv_pdb_fallback_only_infers_known_protein_hydroxyl_donor():
-    asparagine_oxygen = _atom(
-        0, "O", "OD1", (0, 0, 0), resname="ASN"
-    )
+    asparagine_oxygen = _atom(0, "O", "OD1", (0, 0, 0), resname="ASN")
     asparagine_carbon = _atom(1, "C", "CG", (1.2, 0, 0), resname="ASN")
     serine_oxygen = _atom(2, "O", "OG", (4, 0, 0), resname="SER")
     serine_carbon = _atom(3, "C", "CB", (5.2, 0, 0), resname="SER")
@@ -193,12 +191,8 @@ def test_dsv_infers_donor_per_atom_despite_unrelated_explicit_hydrogen():
     donor_carbon = _atom(1, "C", "C1", (-1.3, 0, 0), sybyl_type="C.3")
     _bond(donor, donor_carbon)
 
-    acceptor = _atom(
-        2, "O", "O1", (3.0, 0, 0), sybyl_type="O.2", side="ligand"
-    )
-    acceptor_carbon = _atom(
-        3, "C", "C2", (4.2, 0, 0), sybyl_type="C.2", side="ligand"
-    )
+    acceptor = _atom(2, "O", "O1", (3.0, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_carbon = _atom(3, "C", "C2", (4.2, 0, 0), sybyl_type="C.2", side="ligand")
     unrelated_h = _atom(4, "H", "HX", (8, 8, 8), side="ligand")
     _bond(acceptor, acceptor_carbon, "2")
 
@@ -219,12 +213,8 @@ def test_dsv_infers_donor_per_atom_despite_unrelated_explicit_hydrogen():
 def test_dsv_explicit_hydrogen_has_high_confidence_basis():
     donor = _atom(0, "N", "N1", (0, 0, 0), sybyl_type="N.am")
     hydrogen = _atom(1, "H", "H1", (1, 0, 0))
-    acceptor = _atom(
-        2, "O", "O1", (3.0, 0, 0), sybyl_type="O.2", side="ligand"
-    )
-    acceptor_base = _atom(
-        3, "C", "C1", (3.0, 1.0, 0), sybyl_type="C.2", side="ligand"
-    )
+    acceptor = _atom(2, "O", "O1", (3.0, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(3, "C", "C1", (3.0, 1.0, 0), sybyl_type="C.2", side="ligand")
     _bond(donor, hydrogen)
     _bond(acceptor, acceptor_base, "2")
 
@@ -246,9 +236,7 @@ def test_dsv_explicit_hydrogen_has_high_confidence_basis():
         "pose.mol2",
         frozenset(),
     )
-    frame = export.detail_dataframe(
-        batch_runner.make_result(details=(detail,))
-    )
+    frame = export.detail_dataframe(batch_runner.make_result(details=(detail,)))
 
     assert detail.chemistry_basis == "explicit_hydrogen"
     assert detail.chemistry_confidence == "high"
@@ -283,12 +271,8 @@ def test_dsv_rejects_explicit_hbond_without_acceptor_base_geometry():
 def test_dsv_uses_explicit_hydrogen_geometry_instead_of_heavy_atom_proxy():
     donor = _atom(0, "N", "N", (0, 0, 0), sybyl_type="N.am")
     hydrogen = _atom(1, "H", "HN", (1, 0, 0))
-    acceptor = _atom(
-        2, "O", "O", (3.9, 0, 0), sybyl_type="O.2", side="ligand"
-    )
-    acceptor_base = _atom(
-        3, "C", "C", (3.9, 1, 0), sybyl_type="C.2", side="ligand"
-    )
+    acceptor = _atom(2, "O", "O", (3.9, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(3, "C", "C", (3.9, 1, 0), sybyl_type="C.2", side="ligand")
     _bond(donor, hydrogen)
     _bond(acceptor, acceptor_base, "2")
 
@@ -310,12 +294,8 @@ def test_dsv_uses_explicit_hydrogen_geometry_instead_of_heavy_atom_proxy():
 def test_dsv_rejects_explicit_hydrogen_with_invalid_acceptor_geometry():
     donor = _atom(0, "N", "N", (0, 0, 0), sybyl_type="N.am")
     hydrogen = _atom(1, "H", "HN", (1, 0, 0))
-    acceptor = _atom(
-        2, "O", "O", (3.0, 0, 0), sybyl_type="O.2", side="ligand"
-    )
-    acceptor_base = _atom(
-        3, "C", "C", (2.0, 0, 0), sybyl_type="C.2", side="ligand"
-    )
+    acceptor = _atom(2, "O", "O", (3.0, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(3, "C", "C", (2.0, 0, 0), sybyl_type="C.2", side="ligand")
     _bond(donor, hydrogen)
     _bond(acceptor, acceptor_base, "2")
 
@@ -334,12 +314,8 @@ def test_dsv_emits_one_auditable_record_per_qualifying_hydrogen():
     donor = _atom(0, "N", "ND2", (0, 0, 0), sybyl_type="N.am")
     hydrogen_1 = _atom(1, "H", "HD21", (1, 0.1, 0))
     hydrogen_2 = _atom(2, "H", "HD22", (1, -0.1, 0))
-    acceptor = _atom(
-        3, "O", "O", (3.5, 0, 0), sybyl_type="O.2", side="ligand"
-    )
-    acceptor_base = _atom(
-        4, "C", "C", (3.5, 0, 1), sybyl_type="C.2", side="ligand"
-    )
+    acceptor = _atom(3, "O", "O", (3.5, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(4, "C", "C", (3.5, 0, 1), sybyl_type="C.2", side="ligand")
     _bond(donor, hydrogen_1)
     _bond(donor, hydrogen_2)
     _bond(acceptor, acceptor_base, "2")
@@ -384,21 +360,15 @@ def test_dsv_carbon_hbond_requires_a_polarized_carbon_donor():
         chemistry_profile="dsv",
     )
 
-    assert [atom for atom, _hydrogens in features["carbon_donors"]] == [
-        polarized
-    ]
+    assert [atom for atom, _hydrogens in features["carbon_donors"]] == [polarized]
 
 
-def test_dsv_carbon_hbond_uses_short_hydrogen_distance():
+def test_dsv_carbon_hbond_accepts_corpus_calibrated_hydrogen_distance():
     donor = _atom(0, "C", "CA", (0, 0, 0), sybyl_type="C.3")
     nitrogen_neighbor = _atom(1, "N", "N", (-1, 0, 0), sybyl_type="N.am")
     hydrogen = _atom(2, "H", "HA", (1, 0, 0))
-    acceptor = _atom(
-        3, "O", "O", (3.6, 0, 0), sybyl_type="O.2", side="ligand"
-    )
-    acceptor_base = _atom(
-        4, "C", "C", (3.6, 1, 0), sybyl_type="C.2", side="ligand"
-    )
+    acceptor = _atom(3, "O", "O", (3.6, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(4, "C", "C", (3.6, 1, 0), sybyl_type="C.2", side="ligand")
     _bond(donor, nitrogen_neighbor)
     _bond(donor, hydrogen)
     _bond(acceptor, acceptor_base, "2")
@@ -411,7 +381,7 @@ def test_dsv_carbon_hbond_uses_short_hydrogen_distance():
         chemistry_profile="dsv",
     )
 
-    assert records == []
+    assert len(records) == 1
 
 
 def test_dsv_does_not_infer_missing_hydrogen_on_an_explicitly_protonated_side():
@@ -428,6 +398,24 @@ def test_dsv_does_not_infer_missing_hydrogen_on_an_explicitly_protonated_side():
     )
 
     assert features["donors"] == []
+
+
+def test_dsv_alkyl_feature_uses_hydrophobic_protein_side_chains():
+    histidine_cb = _atom(0, "C", "CB", (0, 0, 0), sybyl_type="C.3", resname="HIS")
+    histidine_ca = _atom(1, "C", "CA", (1.5, 0, 0), sybyl_type="C.3", resname="HIS")
+    cysteine_cb = _atom(2, "C", "CB", (4, 0, 0), sybyl_type="C.3", resname="CYS")
+    cysteine_sg = _atom(3, "S", "SG", (5.5, 0, 0), sybyl_type="S.3", resname="CYS")
+    _bond(histidine_cb, histidine_ca)
+    _bond(cysteine_cb, cysteine_sg)
+
+    features = core.classify(
+        [histidine_cb, histidine_ca, cysteine_cb, cysteine_sg],
+        [],
+        has_h=False,
+        chemistry_profile="dsv",
+    )
+
+    assert features["alkyl"] == [cysteine_cb]
 
 
 def test_pi_lone_pair_detects_axial_acceptor_above_aromatic_ring():
@@ -448,9 +436,7 @@ def test_pi_lone_pair_detects_axial_acceptor_above_aromatic_ring():
     ]
     for index, atom in enumerate(ring_atoms):
         _bond(atom, ring_atoms[(index + 1) % len(ring_atoms)], "ar")
-    acceptor = _atom(
-        10, "O", "O", (0, 0, 3.0), sybyl_type="O.2", side="receptor"
-    )
+    acceptor = _atom(10, "O", "O", (0, 0, 3.0), sybyl_type="O.2", side="receptor")
 
     legacy_records = core.compute_interactions(
         [acceptor],
@@ -477,9 +463,7 @@ def test_pi_lone_pair_detects_axial_acceptor_above_aromatic_ring():
         "pose.mol2",
         frozenset(),
     )
-    frame = export.detail_dataframe(
-        batch_runner.make_result(details=(detail,))
-    )
+    frame = export.detail_dataframe(batch_runner.make_result(details=(detail,)))
 
     assert detail.theta_deg == pytest.approx(0.0)
     assert frame.loc[0, "theta_deg"] == pytest.approx(0.0)
@@ -503,9 +487,7 @@ def test_pi_lone_pair_rejects_planar_aliphatic_ring():
     ]
     for index, atom in enumerate(ring_atoms):
         _bond(atom, ring_atoms[(index + 1) % len(ring_atoms)], "1")
-    acceptor = _atom(
-        10, "O", "O", (0, 0, 3.0), sybyl_type="O.2", side="receptor"
-    )
+    acceptor = _atom(10, "O", "O", (0, 0, 3.0), sybyl_type="O.2", side="receptor")
 
     records = core.compute_interactions(
         [acceptor],
@@ -518,22 +500,14 @@ def test_pi_lone_pair_rejects_planar_aliphatic_ring():
 
 
 def test_dsv_does_not_treat_neutral_histidine_as_cation():
-    neutral_nd1 = _atom(
-        0, "N", "ND1", (0, 0, 0), sybyl_type="N.ar", resname="HIS"
-    )
-    neutral_ne2 = _atom(
-        1, "N", "NE2", (1, 0, 0), sybyl_type="N.ar", resname="HIS"
-    )
+    neutral_nd1 = _atom(0, "N", "ND1", (0, 0, 0), sybyl_type="N.ar", resname="HIS")
+    neutral_ne2 = _atom(1, "N", "NE2", (1, 0, 0), sybyl_type="N.ar", resname="HIS")
     one_hydrogen = _atom(2, "H", "HD1", (-0.5, 0, 0), resname="HIS")
     _bond(neutral_nd1, neutral_ne2, "ar")
     _bond(neutral_nd1, one_hydrogen)
 
-    protonated_nd1 = _atom(
-        3, "N", "ND1", (0, 3, 0), sybyl_type="N.ar", resname="HIP"
-    )
-    protonated_ne2 = _atom(
-        4, "N", "NE2", (1, 3, 0), sybyl_type="N.ar", resname="HIP"
-    )
+    protonated_nd1 = _atom(3, "N", "ND1", (0, 3, 0), sybyl_type="N.ar", resname="HIP")
+    protonated_ne2 = _atom(4, "N", "NE2", (1, 3, 0), sybyl_type="N.ar", resname="HIP")
     _bond(protonated_nd1, protonated_ne2, "ar")
 
     neutral = core.classify(
@@ -555,9 +529,7 @@ def test_dsv_does_not_treat_neutral_histidine_as_cation():
 
 def test_cutoff_values_do_not_implicitly_switch_chemistry_profile():
     donor = _atom(0, "O", "OH", (0, 0, 0), sybyl_type="O.3")
-    amide_acceptor = _atom(
-        1, "N", "N1", (3.0, 0, 0), sybyl_type="N.am", side="ligand"
-    )
+    amide_acceptor = _atom(1, "N", "N1", (3.0, 0, 0), sybyl_type="N.am", side="ligand")
     amide_neighbors = [
         _atom(
             index,
@@ -592,9 +564,7 @@ def test_cutoff_values_do_not_implicitly_switch_chemistry_profile():
     assert chemistry_records == []
 
 
-def test_batch_flows_forward_the_selected_chemistry_profile(
-    monkeypatch, fixture_path
-):
+def test_batch_flows_forward_the_selected_chemistry_profile(monkeypatch, fixture_path):
     profiles = []
 
     def capture_profile(*args, **kwargs):
@@ -651,9 +621,153 @@ USER_CHARGES
     assert len(result.details) == 1
     assert frame.loc[0, "hydrogen_atom"] == "HN"
     assert frame.loc[0, "hydrogen_acceptor_distance_A"] == pytest.approx(2.9)
-    assert frame.loc[0, "donor_hydrogen_acceptor_angle_deg"] == pytest.approx(
-        180.0
+    assert frame.loc[0, "donor_hydrogen_acceptor_angle_deg"] == pytest.approx(180.0)
+    assert frame.loc[0, "hydrogen_acceptor_base_angle_deg"] == pytest.approx(90.0)
+
+
+def _aromatic_ring(side="receptor"):
+    import math
+
+    atoms = [
+        _atom(
+            index,
+            "C",
+            f"C{index}",
+            (math.cos(index * math.pi / 3), math.sin(index * math.pi / 3), 0.0),
+            sybyl_type="C.ar",
+            resname="PHE",
+            side=side,
+        )
+        for index in range(6)
+    ]
+    for index, atom in enumerate(atoms):
+        _bond(atom, atoms[(index + 1) % len(atoms)], "ar")
+    return atoms
+
+
+def test_dsv_detects_pi_sigma_with_explicit_hydrogen_geometry():
+    ring_atoms = _aromatic_ring()
+    carbon = _atom(10, "C", "C1", (0, 0, 3.5), sybyl_type="C.3", side="ligand")
+    hydrogen = _atom(11, "H", "H1", (0, 0, 2.5), side="ligand")
+    anchor = _atom(12, "C", "C2", (1.2, 0, 3.5), sybyl_type="C.3", side="ligand")
+    _bond(carbon, hydrogen)
+    _bond(carbon, anchor)
+
+    records = core.compute_interactions(
+        ring_atoms,
+        [carbon, hydrogen, anchor],
+        types=["pi_sigma"],
+        chemistry_profile="dsv",
     )
-    assert frame.loc[0, "hydrogen_acceptor_base_angle_deg"] == pytest.approx(
-        90.0
+
+    assert len(records) == 1
+    assert records[0]["type"] == "pi_sigma"
+    assert records[0]["hydrogen_obj"] is hydrogen
+    assert records[0]["theta"] == pytest.approx(0.0)
+
+
+def test_dsv_detects_pi_donor_hydrogen_bond():
+    ring_atoms = _aromatic_ring()
+    donor = _atom(10, "N", "N1", (0, 0, 4.0), sybyl_type="N.am", side="ligand")
+    hydrogen = _atom(11, "H", "H1", (0, 0, 3.0), side="ligand")
+    _bond(donor, hydrogen)
+
+    records = core.compute_interactions(
+        ring_atoms,
+        [donor, hydrogen],
+        types=["pi_donor_hbond"],
+        chemistry_profile="dsv",
     )
+
+    assert len(records) == 1
+    assert records[0]["type"] == "pi_donor_hbond"
+    assert records[0]["hydrogen_obj"] is hydrogen
+    assert records[0]["theta"] == pytest.approx(0.0)
+
+
+def test_dsv_pi_alkyl_counts_one_semantic_ring_group_pair():
+    ring_atoms = _aromatic_ring()
+    carbon_1 = _atom(10, "C", "C1", (0, 0, 4.5), sybyl_type="C.3", side="ligand")
+    carbon_2 = _atom(11, "C", "C2", (1.0, 0, 4.5), sybyl_type="C.3", side="ligand")
+    _bond(carbon_1, carbon_2)
+
+    records = core.compute_interactions(
+        ring_atoms,
+        [carbon_1, carbon_2],
+        types=["pialkyl"],
+        chemistry_profile="dsv",
+    )
+
+    assert len(records) == 1
+
+
+def test_dsv_profile_uses_the_discovery_studio_geometry_observed_in_2m5d():
+    cutoffs = core.cutoffs_for_preset("dsv")
+
+    assert cutoffs["pialkyl_dist"] == pytest.approx(4.9)
+    assert cutoffs["alkyl_dist"] == pytest.approx(4.2)
+    assert cutoffs["metal_dist"] == pytest.approx(3.0)
+    assert cutoffs["pi_sulfur_dist"] == pytest.approx(5.3)
+    assert cutoffs["pi_sigma_h_centroid_dist"] == pytest.approx(4.3)
+    assert cutoffs["pi_sigma_axis_angle"] == pytest.approx(40.0)
+    assert cutoffs["pi_sigma_dha_angle"] == pytest.approx(160.0)
+    assert cutoffs["pi_donor_dist"] == pytest.approx(5.2)
+    assert cutoffs["pi_donor_h_centroid_dist"] == pytest.approx(4.1)
+    assert cutoffs["pi_donor_axis_angle"] == pytest.approx(45.0)
+    assert cutoffs["pi_donor_dha_angle"] == pytest.approx(145.0)
+
+
+def test_dsv_pi_sigma_accepts_observed_hydrogen_centroid_distance():
+    ring_atoms = _aromatic_ring()
+    carbon = _atom(10, "C", "C1", (0, 0, 3.8), sybyl_type="C.3", side="ligand")
+    hydrogen = _atom(11, "H", "H1", (0, 0, 2.8), side="ligand")
+    anchor = _atom(12, "C", "C2", (1.2, 0, 3.8), sybyl_type="C.3", side="ligand")
+    _bond(carbon, hydrogen)
+    _bond(carbon, anchor)
+
+    records = core.compute_interactions(
+        ring_atoms,
+        [carbon, hydrogen, anchor],
+        types=["pi_sigma"],
+        chemistry_profile="dsv",
+    )
+
+    assert len(records) == 1
+
+
+def test_dsv_pi_donor_accepts_observed_theta_limit():
+    import math
+
+    ring_atoms = _aromatic_ring()
+    theta = math.radians(44.0)
+    direction = (math.sin(theta), 0.0, math.cos(theta))
+    hydrogen = _atom(
+        11,
+        "H",
+        "H1",
+        tuple(3.9 * component for component in direction),
+        side="ligand",
+    )
+    donor = _atom(
+        10,
+        "N",
+        "N1",
+        tuple(4.9 * component for component in direction),
+        sybyl_type="N.am",
+        side="ligand",
+    )
+    _bond(donor, hydrogen)
+
+    records = core.compute_interactions(
+        ring_atoms,
+        [donor, hydrogen],
+        types=["pi_donor_hbond"],
+        chemistry_profile="dsv",
+    )
+
+    assert len(records) == 1
+
+
+def test_new_dsv_interaction_types_are_exportable():
+    assert "pi_sigma" in core.VALID_TYPES
+    assert "pi_donor_hbond" in core.VALID_TYPES

@@ -9,17 +9,18 @@ interactions in docking poses (`.mol2`, `.pdb`, `.pdbqt`), separates receptor
 from ligand automatically, and shows the results in sortable/filterable tables
 exportable to CSV / XLSX.
 
-The geometric detection core (`interaction_core.py`) is **ported verbatim** from
-the PyMOL plugin `interactions_plugin.py` — same cutoffs, same geometry — so
-results are cross-checkable between the two tools. It has **no PyMOL dependency**.
+The legacy PLIP profile in `interaction_core.py` preserves the geometry and
+cutoffs ported from the PyMOL plugin `interactions_plugin.py`. A separate DSV
+profile adds chemistry-aware, corpus-calibrated rules without changing legacy
+results. DockLens has **no PyMOL dependency**.
 
 **Inventor:** Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
 
-## Interaction types (13)
+## Interaction types (15)
 
 `hbond`, `carbon_hbond`, `saltbridge`, `pipi` (sandwich/T-shaped), `pication`,
-`pialkyl`, `alkyl`, `halogen`, `metal`, `water_bridge`, `pi_sulfur`, `pi_anion`,
-`pi_lone_pair`.
+`pialkyl`, `pi_sigma`, `alkyl`, `halogen`, `metal`, `water_bridge`, `pi_sulfur`,
+`pi_anion`, `pi_donor_hbond`, `pi_lone_pair`.
 Colours use the same colour-blind-safe Okabe-Ito palette as the PyMOL plugin.
 
 ## Download (standalone, no Python needed)
@@ -92,8 +93,8 @@ manifest, hashes or paired analysis are invalid.
    them.
 3. Pick the **H-bond criteria** preset (see below).
 4. Pick the **Analysis view**: Complete preserves every detected interaction;
-   Conservative polar/specific is a reversible post-detection view focused on
-   more specific polar/pi contacts.
+   Discovery Studio-like is a reversible post-detection view that keeps the
+   DSV interaction families and rejects salt bridges longer than 4.0 Å.
 5. **Run detection**.
 6. Sort by clicking a column; filter by interaction type, search text, or
    "key residues only". Edit key residues any time — counts recompute without
@@ -113,7 +114,7 @@ DockLens ships two H-bond profiles:
 | Preset | Explicit-H geometry | Chemistry policy |
 |--------|---------------------|------------------|
 | **PLIP** (default) | D···A ≤ 4.1 Å; legacy angle ≥ 100° | Legacy behavior, retained for reproducibility. |
-| **DS-calibrated beta** | Conventional: H···A ≤ 3.1 Å, D–H···A ≥ 90°, H–A–Y ≥ 90°. Carbon H-bond: H···A ≤ 2.5 Å, D–H···A ≥ 120°, H–A–Y ≥ 90°. | Uses retained MOL2 atom/bond types, explicit hydrogens and conservative donor/acceptor rules. |
+| **DS-calibrated beta** | Conventional: H···A ≤ 3.1 Å, D–H···A ≥ 90°, H–A–Y ≥ 90°. Carbon H-bond: H···A ≤ 3.0 Å, D–H···A ≥ 90°, H–A–Y ≥ 90°. | Uses retained MOL2 atom/bond types, explicit hydrogens and conservative donor/acceptor rules. |
 
 The default (PLIP) is **deliberately permissive** — it matches the companion
 PyMOL plugin so historical numbers remain cross-checkable. The strict profile
@@ -122,20 +123,21 @@ non-donor carbonyl/carboxylate oxygens. Carbon H-bonds require a polarized
 carbon. Its H-bond rows export the participating hydrogen, H···A distance,
 D–H···A angle, H–A–Y angle, inference basis and confidence.
 
-The beta profile was calibrated against the matched `FDSVH_sol16` and
-`FDSLH_sol26` complexes. It reproduces all intermolecular conventional H-bonds,
-carbon H-bonds and the observed lone-pair–π contact in those two references:
-8/8 rows for FDSVH and 9/9 for FDSLH. Each Discovery Studio capture also
-contains one intraligand H-bond; DockLens intentionally excludes those because
-its scope is receptor–ligand interactions. This is an initial calibration, not
-a general claim of parity: the profile should be re-evaluated as the reference
-corpus grows.
+The beta profile was recalibrated with 150 matched 2m5d docking poses annotated
+in Discovery Studio. The visible annotation matrix contains 1,150 interactions
+in eight families; DockLens v0.6.0 reports 1,151 in those same mapped families
+(a 0.1% aggregate difference). At the residue-and-type level, the transparent
+approximation has 0.658 precision/recall against that matrix. The most important
+structural fix is preserving unassigned receptor metals: the calibrated run
+recovers all 133 annotated metal contacts. The aromatic/hydrophobic classes
+remain less exact and should still be reviewed in the auditable Detail sheet.
 
-The **Conservative polar/specific** analysis view does not alter detection or
-discard the complete result. It hides low-specificity `alkyl`/`pialkyl`
-contacts and salt bridges longer than 4.0 Å in the tables and filtered export.
-This is an auditable screening aid, not a claim that DockLens reproduces every
-proprietary Discovery Studio interaction rule.
+This calibration adds `pi_sigma`, `pi_donor_hbond` and `pi_lone_pair`; applies
+semantic deduplication to `pialkyl`; and retains generic ligand identifiers from
+the source filename instead of exporting every CCDC ligand as `RES1`. The
+**Discovery Studio-like** analysis view does not alter or discard the complete
+result. It is a transparent screening aid, not a claim that DockLens reproduces
+every proprietary or user-customized Discovery Studio rule.
 
 ## Ligand vs. receptor resolution (fixed priority)
 
@@ -155,7 +157,7 @@ DockLens exports a versioned, six-sheet workbook:
 | `Summary` | One row per unambiguous pose, with pair counts, distinct key-residue coverage and per-type counts. |
 | `Residue Matrix` | One row per pose and grouped columns for residue × interaction type. |
 | `Key Residue Coverage` | Ranking-audit view separating raw atomic pairs, distinct conserved residues, conventional H-bond coverage and interaction diversity. |
-| `Detail` | Auditable interaction endpoints, pose IDs, atom serials, participating hydrogen, H···A/DHA/HAY geometry and lone-pair–π theta. |
+| `Detail` | Auditable interaction endpoints, pose IDs, atom serials, participating hydrogen, H···A/DHA/HAY geometry and angular descriptors for π contacts. |
 | `Parameters` | DockLens/schema version, preset, cutoffs, export filters and matched/unmatched/ambiguous key-residue identifiers. |
 | `Input QC` | Status, resolution method, atom counts, warnings and parse errors. |
 

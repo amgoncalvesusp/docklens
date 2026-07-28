@@ -25,7 +25,9 @@ def _detail(interaction_id, interaction_type, distance):
         interaction_type=interaction_type,
         subtype="",
         ligand=_endpoint("ligand", atom_name="C1"),
-        receptor=_endpoint("receptor", atom_name="NZ", resname="LYS", resseq="76", chain="A"),
+        receptor=_endpoint(
+            "receptor", atom_name="NZ", resname="LYS", resseq="76", chain="A"
+        ),
         distance_A=distance,
         source_id="source-1",
         pose_id="pose-1",
@@ -49,7 +51,7 @@ def _summary(counts):
     )
 
 
-def test_ds_like_profile_excludes_low_specificity_hydrophobics_and_long_saltbridge():
+def test_ds_like_profile_keeps_dsv_hydrophobics_and_excludes_long_saltbridge():
     result = make_result(
         details=(
             _detail("i1", "hbond", 3.0),
@@ -75,13 +77,15 @@ def test_ds_like_profile_excludes_low_specificity_hydrophobics_and_long_saltbrid
 
     assert [detail.interaction_type for detail in view.details] == [
         "hbond",
+        "alkyl",
+        "pialkyl",
         "pi_lone_pair",
     ]
-    assert view.summaries[0].n_total_interactions == 2
+    assert view.summaries[0].n_total_interactions == 4
     assert view.summaries[0].counts["hbond"] == 1
     assert view.summaries[0].counts["pi_lone_pair"] == 1
-    assert view.summaries[0].counts["alkyl"] == 0
-    assert view.summaries[0].counts["pialkyl"] == 0
+    assert view.summaries[0].counts["alkyl"] == 1
+    assert view.summaries[0].counts["pialkyl"] == 1
     assert view.summaries[0].counts["saltbridge"] == 0
 
 

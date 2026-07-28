@@ -16,7 +16,13 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .entity_resolver import Resolution, _split_waters, resolve, resolve_manual, set_sides
+from .entity_resolver import (
+    Resolution,
+    _split_waters,
+    resolve,
+    resolve_manual,
+    set_sides,
+)
 from .interaction_core import (
     HBOND_PRESETS,
     VALID_TYPES,
@@ -289,12 +295,8 @@ def _detail_from_interaction(
             hydrogen_obj.serial if hydrogen_obj is not None else None
         ),
         hydrogen_acceptor_distance_A=it.get("hydrogen_acceptor_distance"),
-        donor_hydrogen_acceptor_angle_deg=it.get(
-            "donor_hydrogen_acceptor_angle"
-        ),
-        hydrogen_acceptor_base_angle_deg=it.get(
-            "hydrogen_acceptor_base_angle"
-        ),
+        donor_hydrogen_acceptor_angle_deg=it.get("donor_hydrogen_acceptor_angle"),
+        hydrogen_acceptor_base_angle_deg=it.get("hydrogen_acceptor_base_angle"),
         theta_deg=it.get("theta"),
     )
 
@@ -350,12 +352,14 @@ def run(
     confirm_fallback if True, fallback resolutions are run anyway (headless);
                      if False, they are collected in RunResult.pending instead.
     manual_overrides {source_file: set_of_ligand_serials} to force a split.
-    hbond_preset     'plip' (default, legacy) or 'dsv' (chemistry-aware strict;
-                     Discovery Studio calibration is still pending).
+    hbond_preset     'plip' (default, legacy) or 'dsv' (chemistry-aware,
+                     empirically calibrated against Discovery Studio data).
     """
-    if isinstance(max_file_size_bytes, bool) or not isinstance(
-        max_file_size_bytes, int
-    ) or max_file_size_bytes <= 0:
+    if (
+        isinstance(max_file_size_bytes, bool)
+        or not isinstance(max_file_size_bytes, int)
+        or max_file_size_bytes <= 0
+    ):
         raise ValueError("max_file_size_bytes must be a positive integer")
     requested_types = _normalize_types(types)
     hbond_preset = _normalize_preset(hbond_preset)
@@ -406,7 +410,9 @@ def run(
                     source_path=path,
                     status="error",
                     code="file_stat_error",
-                    message=_safe_exception_message("Could not inspect input file", exc),
+                    message=_safe_exception_message(
+                        "Could not inspect input file", exc
+                    ),
                     format=fmt,
                 )
             )
@@ -587,9 +593,7 @@ def run(
                             ),
                             format=fmt,
                             poses_found=len(poses),
-                            resolution_method=_safe_qc_text(
-                                getattr(res, "method", "")
-                            ),
+                            resolution_method=_safe_qc_text(getattr(res, "method", "")),
                         )
                     )
                     continue
@@ -658,7 +662,9 @@ def run_paired(
         app_version=__version__,
         started_at=datetime.now(timezone.utc).isoformat(),
         hbond_preset=preset,
-        cutoffs=tuple(sorted((key, float(value)) for key, value in effective_cutoffs.items())),
+        cutoffs=tuple(
+            sorted((key, float(value)) for key, value in effective_cutoffs.items())
+        ),
         interaction_types=requested_types,
         key_residues=tuple(sorted(key_set)),
     )
@@ -707,49 +713,57 @@ def run_paired(
                 )
                 for index, interaction in enumerate(interactions, 1)
             ]
-            summaries_out.append(_summarize(
-                ligand_id,
-                poses_path,
-                pose.sol,
-                pose_no,
-                pose.score,
-                details,
-                key_set,
-                source_id=source_id,
-                pose_id=pose_id,
-                resolution_method="paired-manifest",
-            ))
+            summaries_out.append(
+                _summarize(
+                    ligand_id,
+                    poses_path,
+                    pose.sol,
+                    pose_no,
+                    pose.score,
+                    details,
+                    key_set,
+                    source_id=source_id,
+                    pose_id=pose_id,
+                    resolution_method="paired-manifest",
+                )
+            )
             details_out.extend(details)
-            qc_out.append(InputQC(
-                source_id=source_id,
-                source_file=os.path.basename(poses_path),
-                source_path=poses_path,
-                pose_id=pose_id,
-                status="success",
-                format=pose.fmt,
-                poses_found=len(ligand_poses),
-                poses_processed=1,
-                resolution_method="paired-manifest",
-                receptor_atoms=len(receptor_atoms),
-                ligand_atoms=len(pose.atoms),
-                water_atoms=len(receptor_waters),
-            ))
+            qc_out.append(
+                InputQC(
+                    source_id=source_id,
+                    source_file=os.path.basename(poses_path),
+                    source_path=poses_path,
+                    pose_id=pose_id,
+                    status="success",
+                    format=pose.fmt,
+                    poses_found=len(ligand_poses),
+                    poses_processed=1,
+                    resolution_method="paired-manifest",
+                    receptor_atoms=len(receptor_atoms),
+                    ligand_atoms=len(pose.atoms),
+                    water_atoms=len(receptor_waters),
+                )
+            )
         except Exception as exc:  # noqa: BLE001 - isolate one paired pose
-            qc_out.append(InputQC(
-                source_id=source_id,
-                source_file=os.path.basename(poses_path),
-                source_path=poses_path,
-                pose_id=pose_id,
-                status="error",
-                code="pose_error",
-                message=_safe_exception_message("Could not process paired pose", exc),
-                format=pose.fmt,
-                poses_found=len(ligand_poses),
-                resolution_method="paired-manifest",
-                receptor_atoms=len(receptor_atoms),
-                ligand_atoms=len(pose.atoms),
-                water_atoms=len(receptor_waters),
-            ))
+            qc_out.append(
+                InputQC(
+                    source_id=source_id,
+                    source_file=os.path.basename(poses_path),
+                    source_path=poses_path,
+                    pose_id=pose_id,
+                    status="error",
+                    code="pose_error",
+                    message=_safe_exception_message(
+                        "Could not process paired pose", exc
+                    ),
+                    format=pose.fmt,
+                    poses_found=len(ligand_poses),
+                    resolution_method="paired-manifest",
+                    receptor_atoms=len(receptor_atoms),
+                    ligand_atoms=len(pose.atoms),
+                    water_atoms=len(receptor_waters),
+                )
+            )
 
     return make_result(
         details=details_out,

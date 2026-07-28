@@ -16,6 +16,7 @@ dist/
 coverage.xml
 htmlcov/
 .venv/
+/.tmp/
 
 # Local example exports (may contain research data)
 /interactions.xlsx
@@ -27,3 +28,7 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+/.tmp_2m5dInteractions.xlsx
+/tmp_2m5dInteractions.xlsx
+/tmp_2m5dBestSolutions/
+/dsv_corpus_extract_tmp.mjs

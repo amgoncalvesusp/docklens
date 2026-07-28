@@ -1,11 +1,13 @@
 """Portable smoke tests for the current parsing and detection pipeline."""
 
 from __future__ import annotations
+from types import SimpleNamespace
+
 
 from docklens import batch_runner as br
 from docklens import export
 from docklens.entity_resolver import resolve, set_sides
-from docklens.interaction_core import compute_interactions
+from docklens.interaction_core import Atom, compute_interactions
 from docklens.parser_mol2 import parse_mol2
 from docklens.parser_pdb import parse_pdb
 from docklens.parser_pdbqt import parse_pdbqt
@@ -21,6 +23,25 @@ def test_mol2_ccdc_fixture_is_portable(fixture_path):
     assert len(resolutions) == 1
     assert resolutions[0].method == "ccdc"
     assert resolutions[0].needs_confirmation is False
+
+
+def test_ccdc_resolution_preserves_unassigned_receptor_metal_and_uses_source_id():
+    receptor = Atom(0, "C", "CA", "ALA", "89", serial=1)
+    ligand = Atom(1, "C", "C1", "RES", "1", serial=2)
+    zinc = Atom(2, "Zn", "ZN", "ZN", "301", serial=3)
+    pose = SimpleNamespace(
+        atoms=[receptor, ligand, zinc],
+        ccdc_ligand={2},
+        ccdc_receptor={1},
+        group_info={},
+        group_subst={},
+        is_hetatm={},
+    )
+
+    resolution = resolve(pose, import_stem="B1_sol44_2m5d")[0]
+
+    assert zinc in resolution.receptor_atoms
+    assert resolution.ligand_id == "B1_sol44_2m5d"
 
 
 def test_pdb_fixture_resolves_and_detects_hbond(fixture_path):
@@ -50,7 +71,10 @@ def test_current_csv_and_xlsx_exports_still_work(fixture_path, tmp_path):
     result = br.run([fixture_path("minimal_complex.pdb")])
 
     csv_paths = export.export_csv(result, tmp_path / "interactions")
-    assert all(path.exists() and path.stat().st_size for path in map(__import__("pathlib").Path, csv_paths))
+    assert all(
+        path.exists() and path.stat().st_size
+        for path in map(__import__("pathlib").Path, csv_paths)
+    )
 
     xlsx_path = export.export_xlsx(result, str(tmp_path / "interactions.xlsx"))
     assert __import__("pathlib").Path(xlsx_path).stat().st_size > 0

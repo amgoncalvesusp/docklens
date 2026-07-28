@@ -57,9 +57,7 @@ def test_window_runs_filters_and_recomputes_keys(qtbot, fixture_path):
     assert "matched" in window.key_status.text().lower()
 
 
-def test_window_normalizes_and_reports_invalid_key_residue_input(
-    qtbot, fixture_path
-):
+def test_window_normalizes_and_reports_invalid_key_residue_input(qtbot, fixture_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window._files = [fixture_path("minimal_complex.pdb")]
@@ -130,7 +128,7 @@ def test_window_analysis_profile_filters_visible_tables(qtbot):
 
     window.analysis_combo.setCurrentIndex(window.analysis_combo.findData("ds_like"))
 
-    assert window.detail_proxy.rowCount() == 1
+    assert window.detail_proxy.rowCount() == 2
     assert window.summary_model.rowCount() == 1
 
 
@@ -148,7 +146,9 @@ def test_window_loads_explicit_vinalab_pair(qtbot, fixture_path):
     window.load_manifest(manifest)
 
     assert len(window._result.summaries) == 2
-    assert all(item.resolution_method == "paired-manifest" for item in window._result.summaries)
+    assert all(
+        item.resolution_method == "paired-manifest" for item in window._result.summaries
+    )
     assert "DockingHub" in window.status.currentMessage()
 
 
@@ -180,7 +180,9 @@ def test_manifest_rerun_keeps_type_checkboxes_as_visual_filters(
     assert "types" not in captured
 
 
-def test_window_keeps_running_when_manifest_pair_cannot_be_parsed(qtbot, monkeypatch, tmp_path):
+def test_window_keeps_running_when_manifest_pair_cannot_be_parsed(
+    qtbot, monkeypatch, tmp_path
+):
     window = MainWindow()
     qtbot.addWidget(window)
     manifest = SimpleNamespace(
@@ -196,7 +198,9 @@ def test_window_keeps_running_when_manifest_pair_cannot_be_parsed(qtbot, monkeyp
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("bad pair")),
     )
     shown = []
-    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args: shown.append(args))
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "critical", lambda *args: shown.append(args)
+    )
 
     window.load_manifest(manifest)
 
@@ -205,7 +209,9 @@ def test_window_keeps_running_when_manifest_pair_cannot_be_parsed(qtbot, monkeyp
     assert "could not" in window.status.currentMessage().lower()
 
 
-def test_window_writes_vinalab_roundtrip_after_manifest_analysis(qtbot, fixture_path, monkeypatch, tmp_path):
+def test_window_writes_vinalab_roundtrip_after_manifest_analysis(
+    qtbot, fixture_path, monkeypatch, tmp_path
+):
     window = MainWindow()
     qtbot.addWidget(window)
     manifest = SimpleNamespace(

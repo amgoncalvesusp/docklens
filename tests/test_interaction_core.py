@@ -63,6 +63,7 @@ def test_vector_helpers_and_cutoff_snapshots_are_isolated():
     assert core.cutoffs_for_preset("dsv")["hbond_dist"] == 4.1
     assert core.cutoffs_for_preset("dsv")["hbond_h_a_dist"] == 3.1
     assert "hbond_h_a_dist" not in core.cutoffs_for_preset("plip")
+    assert core.cutoffs_for_preset("dsv")["alkyl_dist"] == 4.2
     assert core.cutoffs_for_preset("unknown")["hbond_dist"] == 4.1
 
 

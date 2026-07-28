@@ -17,11 +17,15 @@ _DS_LIKE_TYPES = frozenset(
         "carbon_hbond",
         "saltbridge",
         "pipi",
+        "pi_sigma",
         "pication",
+        "pialkyl",
+        "alkyl",
         "halogen",
         "metal",
         "water_bridge",
         "pi_sulfur",
+        "pi_donor_hbond",
         "pi_anion",
         "pi_lone_pair",
     }
@@ -55,9 +59,7 @@ def build_analysis_view(result: RunResult, profile="complete") -> RunResult:
     if profile == "complete":
         return result
     details = tuple(
-        detail
-        for detail in result.details
-        if detail_matches_profile(detail, profile)
+        detail for detail in result.details if detail_matches_profile(detail, profile)
     )
     by_pose = {}
     for detail in details:

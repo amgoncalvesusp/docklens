@@ -245,15 +245,13 @@ class MainWindow(QtWidgets.QMainWindow):
         top.addWidget(QtWidgets.QLabel("H-bond criteria:"))
         self.preset_combo = QtWidgets.QComboBox()
         self.preset_combo.addItem("PLIP (default)", "plip")
-        self.preset_combo.addItem(
-            "DS-calibrated beta (explicit-H geometry)", "dsv"
-        )
+        self.preset_combo.addItem("DS-calibrated beta (explicit-H geometry)", "dsv")
         top.addWidget(self.preset_combo)
         top.addSpacing(12)
         top.addWidget(QtWidgets.QLabel("Analysis view:"))
         self.analysis_combo = QtWidgets.QComboBox()
         self.analysis_combo.addItem("Complete", "complete")
-        self.analysis_combo.addItem("Conservative polar/specific", "ds_like")
+        self.analysis_combo.addItem("Discovery Studio-like", "ds_like")
         self.analysis_combo.currentIndexChanged.connect(self._refresh_tables)
         top.addWidget(self.analysis_combo)
         top.addStretch(1)
@@ -397,7 +395,9 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         if result.pending and self._launch_manifest is None:
             if not self._confirm_pending(result):
-                self.status.showMessage("Run cancelled at ligand/receptor confirmation.")
+                self.status.showMessage(
+                    "Run cancelled at ligand/receptor confirmation."
+                )
                 return
             result = br.run(
                 self._files,
@@ -492,9 +492,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         view = build_analysis_view(self._result, self._analysis_profile())
         self.summary_model.set_dataframe(export.summary_dataframe(view))
-        self.coverage_model.set_dataframe(
-            export.key_residue_coverage_dataframe(view)
-        )
+        self.coverage_model.set_dataframe(export.key_residue_coverage_dataframe(view))
         self.detail_model.set_dataframe(export.detail_dataframe(view))
         self._apply_filters()
         if len(view.details) < 500:
@@ -564,15 +562,12 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             if match.matched_residues:
                 message += (
-                    f" ({len(match.matched_residues)} concrete receptor "
-                    "residue(s))"
+                    f" ({len(match.matched_residues)} concrete receptor residue(s))"
                 )
             if match.unmatched_keys:
                 message += "; unmatched: " + ", ".join(match.unmatched_keys)
             if match.ambiguous_keys:
-                message += (
-                    "; chain-ambiguous: " + ", ".join(match.ambiguous_keys)
-                )
+                message += "; chain-ambiguous: " + ", ".join(match.ambiguous_keys)
             message += "."
         if self._key_invalid_tokens:
             message += " Invalid: " + ", ".join(self._key_invalid_tokens) + "."

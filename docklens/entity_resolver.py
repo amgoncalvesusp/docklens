@@ -68,11 +68,21 @@ def _ligand_id_from_group_info(info: str, fallback: str) -> str:
     return fallback
 
 
+def _is_generic_ligand_tag(tag):
+    """Return True for placeholder residue ids emitted by docking tools."""
+    value = str(tag or "").strip().upper()
+    return value in {"LIG", "LIG1", "RES", "UNK", "UNL"} or (
+        value.startswith("RES") and value[3:].isdigit()
+    )
+
+
 def _ligand_id_from_atoms(ligand_atoms, fallback):
     if not ligand_atoms:
         return fallback
     tag = ligand_atoms[0].res_tag()
-    return tag if tag and tag != "_" else fallback
+    if not tag or tag == "_" or _is_generic_ligand_tag(tag):
+        return fallback
+    return tag
 
 
 def _connected_components(atoms):
@@ -113,7 +123,15 @@ def resolve(pose, import_stem=None):
         lig_serials = pose.ccdc_ligand
         ligand = [a for a in pose.atoms if a.serial in lig_serials]
         if pose.ccdc_receptor:
-            receptor = [a for a in pose.atoms if a.serial in pose.ccdc_receptor]
+            receptor_serials = set(pose.ccdc_receptor)
+            receptor = [a for a in pose.atoms if a.serial in receptor_serials]
+            assigned = set(lig_serials) | receptor_serials
+            receptor.extend(
+                a
+                for a in pose.atoms
+                if a.serial not in assigned
+                and (a.elem in _METALS or a.resn.upper() in _WATER_RESN)
+            )
         else:
             receptor = [a for a in pose.atoms if a.serial not in lig_serials]
         receptor, waters = _split_waters(receptor)
