@@ -37,10 +37,15 @@ from .observation_series import (
     ObservationSeries,
     observation_series_from_dataframe,
 )
+from .observation_identity import (
+    VALID_OBSERVATION_LABEL_MODES,
+    observation_labels,
+)
 from .plotting import (
     ChartArtifact,
     build_comparison_chart,
     build_fingerprint_chart,
+    build_interaction_heatmap_chart,
     build_residue_chart,
     build_retention_chart,
     build_similarity_chart,
@@ -129,6 +134,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         self._source_comparison: RunResult | None = None
         self._ligand_group: str | None = None
         self._comparison_ligand_group: str | None = None
+        self._observation_label_mode = "ligand"
         self._series: ObservationSeries | None = None
         self._comparison_series: ObservationSeries | None = None
         self._mode = "docking"
@@ -207,6 +213,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.fingerprint_export_combo = QtWidgets.QComboBox()
         for label, value in (
             ("Interaction fingerprint", "fingerprint"),
+            ("Interaction comparison heatmap", "interaction_heatmap"),
             ("Similarity matrix", "similarity"),
             ("State populations", "population"),
             ("State timeline / pose order", "timeline"),
@@ -216,6 +223,59 @@ class AnalyticsWorkspace(QtCore.QObject):
             self.fingerprint_export_combo.addItem(label, value)
         export_row.addWidget(self.fingerprint_export_combo)
         layout.addLayout(export_row)
+        heatmap_box = QtWidgets.QGroupBox("Interaction comparison heatmap")
+        heatmap_layout = QtWidgets.QVBoxLayout(heatmap_box)
+        heatmap_controls = QtWidgets.QHBoxLayout()
+        heatmap_controls.addWidget(QtWidgets.QLabel("Compare rows:"))
+        self.heatmap_group_combo = QtWidgets.QComboBox()
+        self.heatmap_group_combo.addItem(
+            "Ligands / uploaded files", "source"
+        )
+        self.heatmap_group_combo.addItem(
+            "Individual poses", "observation"
+        )
+        self.heatmap_group_combo.currentIndexChanged.connect(
+            self.refresh_heatmap
+        )
+        heatmap_controls.addWidget(self.heatmap_group_combo)
+        heatmap_controls.addWidget(QtWidgets.QLabel("Columns:"))
+        self.heatmap_feature_combo = QtWidgets.QComboBox()
+        self.heatmap_feature_combo.addItem(
+            "Residue × interaction type", "residue_type"
+        )
+        self.heatmap_feature_combo.addItem(
+            "Residue (any interaction)", "residue"
+        )
+        self.heatmap_feature_combo.currentIndexChanged.connect(
+            self.refresh_heatmap
+        )
+        heatmap_controls.addWidget(self.heatmap_feature_combo)
+        heatmap_controls.addWidget(QtWidgets.QLabel("Top features:"))
+        self.heatmap_top_combo = QtWidgets.QComboBox()
+        for label, value in (
+            ("20", 20),
+            ("40", 40),
+            ("80", 80),
+            ("All", None),
+        ):
+            self.heatmap_top_combo.addItem(label, value)
+        self.heatmap_top_combo.setCurrentIndex(
+            self.heatmap_top_combo.findData(40)
+        )
+        self.heatmap_top_combo.currentIndexChanged.connect(
+            self.refresh_heatmap
+        )
+        heatmap_controls.addWidget(self.heatmap_top_combo)
+        heatmap_controls.addStretch(1)
+        heatmap_layout.addLayout(heatmap_controls)
+        self.heatmap_status = QtWidgets.QLabel()
+        self.heatmap_status.setObjectName("metricStrip")
+        self.heatmap_status.setWordWrap(True)
+        heatmap_layout.addWidget(self.heatmap_status)
+        self.interaction_heatmap_panel = ChartPanel(minimum_height=410)
+        self.interaction_heatmap_panel.setObjectName("analysisField")
+        heatmap_layout.addWidget(self.interaction_heatmap_panel)
+        layout.addWidget(heatmap_box)
         self.fingerprint_panel = ChartPanel(minimum_height=390)
         self.fingerprint_panel.setObjectName("analysisField")
         layout.addWidget(self.fingerprint_panel)
@@ -375,6 +435,18 @@ class AnalyticsWorkspace(QtCore.QObject):
         self._ligand_group = group_key
         self.refresh()
 
+    @property
+    def observation_label_mode(self) -> str:
+        return self._observation_label_mode
+
+    def set_observation_label_mode(self, label_mode: str) -> None:
+        if label_mode not in VALID_OBSERVATION_LABEL_MODES:
+            raise ValueError("unsupported observation label mode")
+        if label_mode == self._observation_label_mode:
+            return
+        self._observation_label_mode = label_mode
+        self.refresh()
+
     def set_observation_series(
         self,
         series: ObservationSeries | None,
@@ -408,7 +480,7 @@ class AnalyticsWorkspace(QtCore.QObject):
             if comparison:
                 self.refresh_compare()
             else:
-                self._refresh_states()
+                self.refresh()
 
     def clear_observation_series(self):
         self._series = None
@@ -472,6 +544,11 @@ class AnalyticsWorkspace(QtCore.QObject):
             selector.blockSignals(False)
         self.time_step_spin.setEnabled(mode == "md")
         self.load_trajectory_map_button.setEnabled(mode == "md")
+        observation_index = self.heatmap_group_combo.findData("observation")
+        self.heatmap_group_combo.setItemText(
+            observation_index,
+            "Individual frames" if mode == "md" else "Individual poses",
+        )
         self.refresh()
 
     def _active_md_series(self, *, comparison=False):
@@ -500,6 +577,19 @@ class AnalyticsWorkspace(QtCore.QObject):
         self._tasks.invalidate()
         prevalence = residue_type_prevalence(self._result)
         self._fingerprint_matrix = fingerprint_matrix(self._result)
+        label_series = (
+            self._active_md_series() if self._mode == "md" else None
+        )
+        if label_series is not None:
+            self._fingerprint_matrix = self._fingerprint_matrix.loc[
+                list(label_series.observation_ids)
+            ]
+        self._observation_labels = observation_labels(
+            self._result,
+            mode=self._mode,
+            label_mode=self._observation_label_mode,
+            series=label_series,
+        )
         similarity_matrix = self._fingerprint_matrix
         if len(similarity_matrix.index) > _MAX_SIMILARITY_OBSERVATIONS:
             last = len(similarity_matrix.index) - 1
@@ -532,6 +622,7 @@ class AnalyticsWorkspace(QtCore.QObject):
             self._result,
             mode=self._mode,
             matrix=self._fingerprint_matrix,
+            observation_labels=self._observation_labels,
         )
         self.residue_panel.set_artifact(residue_artifact)
         self.residue_barcode_panel.set_artifact(barcode_artifact)
@@ -540,15 +631,24 @@ class AnalyticsWorkspace(QtCore.QObject):
                 self._result,
                 mode=self._mode,
                 matrix=self._fingerprint_matrix,
+                observation_labels=self._observation_labels,
             )
         )
+        similarity_labels = {
+            observation_id: self._observation_labels.get(
+                str(observation_id), str(observation_id)
+            )
+            for observation_id in self._similarity_source_matrix.index
+        }
         self.similarity_panel.set_artifact(
             build_similarity_chart(
                 self._result,
                 matrix=self._similarity_source_matrix,
                 similarity=self._fingerprint_similarity,
+                observation_labels=similarity_labels,
             )
         )
+        self.refresh_heatmap()
         self._refresh_residue_selector()
         self._refresh_clusters()
         self._refresh_states()
@@ -596,13 +696,75 @@ class AnalyticsWorkspace(QtCore.QObject):
             values = (
                 cluster.cluster_id,
                 len(cluster.members),
-                cluster.medoid,
+                self._observation_labels.get(
+                    cluster.medoid, cluster.medoid
+                ),
                 f"{cluster.mean_similarity:.3f}",
             )
             for column, value in enumerate(values):
                 self.cluster_table.setItem(
                     row, column, QtWidgets.QTableWidgetItem(str(value))
                 )
+
+    def refresh_heatmap(self):
+        if not hasattr(self, "interaction_heatmap_panel"):
+            return
+        group_by = self.heatmap_group_combo.currentData() or "source"
+        result = self._source_result if group_by == "source" else self._result
+        if self._mode == "md":
+            if group_by == "source":
+                series = (
+                    self._series
+                    if self._series is not None
+                    else default_md_series_for_result(
+                        result,
+                        time_step_ns=self.time_step_spin.value(),
+                    )
+                )
+            else:
+                series = self._active_md_series()
+        else:
+            series = None
+        artifact = build_interaction_heatmap_chart(
+            result,
+            group_by=group_by,
+            feature_level=(
+                self.heatmap_feature_combo.currentData() or "residue_type"
+            ),
+            label_mode=self._observation_label_mode,
+            mode=self._mode,
+            series=series,
+            top_n=self.heatmap_top_combo.currentData(),
+        )
+        self.interaction_heatmap_panel.set_artifact(artifact)
+        scope = (
+            "all loaded ligand/file groups"
+            if group_by == "source"
+            else "active chart scope"
+        )
+        unit = "poses" if self._mode == "docking" else "saved frames"
+        limited = (
+            artifact.metadata["features_before_limit"]
+            > artifact.metadata["features_displayed"]
+        )
+        render_limited = (
+            artifact.metadata["rows_sampled"]
+            or artifact.metadata["hard_feature_limit_applied"]
+        )
+        self.heatmap_status.setText(
+            f"{artifact.metadata['rows_displayed']} row(s) · "
+            f"{artifact.metadata['features_displayed']} feature(s) · "
+            f"{artifact.metadata['total_observations']} {unit} · {scope}. "
+            "Each row uses its own denominator; zero-contact observations "
+            "are included."
+            + (" Top-feature limit applied." if limited else "")
+            + (
+                " Display safety limit applied; exported metadata records "
+                "the deterministic reduction."
+                if render_limited
+                else ""
+            )
+        )
 
     def _refresh_states(self):
         if not hasattr(self, "state_threshold_spin"):
@@ -918,6 +1080,7 @@ class AnalyticsWorkspace(QtCore.QObject):
             return self.residue_panel.artifact
         if workspace_index == 1:
             panels = {
+                "interaction_heatmap": self.interaction_heatmap_panel,
                 "fingerprint": self.fingerprint_panel,
                 "similarity": self.similarity_panel,
                 "population": self.state_population_panel,
@@ -948,6 +1111,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         for panel in (
             self.residue_panel,
             self.residue_barcode_panel,
+            self.interaction_heatmap_panel,
             self.fingerprint_panel,
             self.similarity_panel,
             self.compare_panel,

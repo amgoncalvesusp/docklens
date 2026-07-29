@@ -97,6 +97,10 @@ def _project(source):
         confidence_level=0.95,
         primary_ligand_group="source-1",
         comparison_ligand_group=None,
+        observation_label_mode="file",
+        heatmap_group_by="observation",
+        heatmap_feature_level="residue",
+        heatmap_top_n=80,
     )
 
 
@@ -116,6 +120,10 @@ def test_project_round_trip_preserves_settings_hashes_and_methods(tmp_path):
     assert loaded.primary.result == project.primary.result
     assert loaded.primary.observation_series == project.primary.observation_series
     assert loaded.primary_ligand_group == "source-1"
+    assert loaded.observation_label_mode == "file"
+    assert loaded.heatmap_group_by == "observation"
+    assert loaded.heatmap_feature_level == "residue"
+    assert loaded.heatmap_top_n == 80
 
 
 def test_project_detects_missing_or_changed_sources(tmp_path):
@@ -152,7 +160,10 @@ def test_project_loader_rejects_oversized_unknown_or_invalid_documents(tmp_path)
         load_project(malformed)
 
 
-def test_schema_one_project_migrates_to_all_ligand_groups(tmp_path):
+@pytest.mark.parametrize("legacy_schema", ("1", "2"))
+def test_legacy_project_migrates_to_current_chart_defaults(
+    tmp_path, legacy_schema
+):
     source = tmp_path / "frames.pdb"
     source.write_text("MODEL 1\nENDMDL\n", encoding="utf-8")
     current = tmp_path / "current.docklens"
@@ -163,9 +174,13 @@ def test_schema_one_project_migrates_to_all_ligand_groups(tmp_path):
             for item in archive.infolist()
         }
     manifest = json.loads(members["manifest.json"])
-    manifest["schema_version"] = "1"
+    manifest["schema_version"] = legacy_schema
     manifest["project"].pop("primary_ligand_group", None)
     manifest["project"].pop("comparison_ligand_group", None)
+    manifest["project"].pop("observation_label_mode", None)
+    manifest["project"].pop("heatmap_group_by", None)
+    manifest["project"].pop("heatmap_feature_level", None)
+    manifest["project"].pop("heatmap_top_n", None)
     members["manifest.json"] = json.dumps(manifest).encode("utf-8")
     legacy = tmp_path / "legacy.docklens"
     with zipfile.ZipFile(legacy, "w") as archive:
@@ -176,6 +191,10 @@ def test_schema_one_project_migrates_to_all_ligand_groups(tmp_path):
 
     assert loaded.primary_ligand_group is None
     assert loaded.comparison_ligand_group is None
+    assert loaded.observation_label_mode == "ligand"
+    assert loaded.heatmap_group_by == "source"
+    assert loaded.heatmap_feature_level == "residue_type"
+    assert loaded.heatmap_top_n == 40
 
 
 def test_methods_summary_discloses_counting_state_and_bootstrap_assumptions(tmp_path):
@@ -194,6 +213,8 @@ def test_methods_summary_discloses_counting_state_and_bootstrap_assumptions(tmp_
     assert "1 replica" in text
     assert "Primary chart scope" in text
     assert "poses.mol2" in text
+    assert "Observation labels: Uploaded file name" in text
+    assert "Heatmap: individual observations" in text
 
 
 def test_comparison_series_round_trip_and_methods_are_disclosed(tmp_path):

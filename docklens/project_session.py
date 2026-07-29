@@ -29,8 +29,8 @@ from .results import (
     Summary,
 )
 
-PROJECT_SCHEMA_VERSION = "2"
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2"})
+PROJECT_SCHEMA_VERSION = "3"
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2", "3"})
 MAX_PROJECT_BYTES = 5 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 8
@@ -136,6 +136,10 @@ class ProjectState:
     confidence_level: float = 0.95
     primary_ligand_group: str | None = None
     comparison_ligand_group: str | None = None
+    observation_label_mode: str = "ligand"
+    heatmap_group_by: str = "source"
+    heatmap_feature_level: str = "residue_type"
+    heatmap_top_n: int | None = 40
 
     def __post_init__(self) -> None:
         threshold = float(self.state_threshold)
@@ -169,6 +173,17 @@ class ProjectState:
             object.__setattr__(
                 self, name, None if value is None else str(value)
             )
+        if self.observation_label_mode not in {"ligand", "file", "index"}:
+            raise ValueError("observation_label_mode is not supported")
+        if self.heatmap_group_by not in {"source", "observation"}:
+            raise ValueError("heatmap_group_by is not supported")
+        if self.heatmap_feature_level not in {"residue_type", "residue"}:
+            raise ValueError("heatmap_feature_level is not supported")
+        if self.heatmap_top_n is not None:
+            top_n = int(self.heatmap_top_n)
+            if top_n < 1 or top_n > 10_000:
+                raise ValueError("heatmap_top_n is outside the supported range")
+            object.__setattr__(self, "heatmap_top_n", top_n)
         object.__setattr__(self, "key_residues", tuple(self.key_residues))
         object.__setattr__(self, "selected_types", tuple(self.selected_types))
 
@@ -260,6 +275,26 @@ def methods_summary(project: ProjectState) -> str:
         if project.comparison is not None
         else ""
     )
+    label_name = {
+        "ligand": "Ligand name",
+        "file": "Uploaded file name",
+        "index": "Pose / frame index",
+    }[project.observation_label_mode]
+    heatmap_rows = (
+        "ligand/uploaded-file groups"
+        if project.heatmap_group_by == "source"
+        else "individual observations"
+    )
+    heatmap_features = (
+        "residue × interaction type"
+        if project.heatmap_feature_level == "residue_type"
+        else "residue with any interaction"
+    )
+    heatmap_limit = (
+        "all features"
+        if project.heatmap_top_n is None
+        else f"top {project.heatmap_top_n} features"
+    )
     return (
         "DockLens reproducible analysis\n"
         "Application version: {version}\n"
@@ -269,6 +304,8 @@ def methods_summary(project: ProjectState) -> str:
         "Primary observation axis: {time_axis}.\n"
         "Trajectory mapping: {axis_source}.{comparison_axis}\n"
         "Primary chart scope: {primary_scope}.{comparison_scope}\n"
+        "Observation labels: {label_name}.\n"
+        "Heatmap: {heatmap_rows}; {heatmap_features}; {heatmap_limit}.\n"
         "Interaction counting: one presence per observation, receptor residue, "
         "and interaction type.\n"
         "Fingerprint similarity: Jaccard/Tanimoto coefficient.\n"
@@ -292,6 +329,10 @@ def methods_summary(project: ProjectState) -> str:
         comparison_axis=comparison_axis,
         primary_scope=primary_scope,
         comparison_scope=comparison_scope,
+        label_name=label_name,
+        heatmap_rows=heatmap_rows,
+        heatmap_features=heatmap_features,
+        heatmap_limit=heatmap_limit,
         threshold=project.state_threshold,
         iterations=project.bootstrap_iterations,
         block_size=block_size,
@@ -529,6 +570,20 @@ def _decode_document(
                 if payload.get("comparison_ligand_group") is None
                 else _text(payload, "comparison_ligand_group")
             ),
+            observation_label_mode=str(
+                payload.get("observation_label_mode", "ligand")
+            ),
+            heatmap_group_by=str(
+                payload.get("heatmap_group_by", "source")
+            ),
+            heatmap_feature_level=str(
+                payload.get("heatmap_feature_level", "residue_type")
+            ),
+            heatmap_top_n=(
+                None
+                if payload.get("heatmap_top_n", 40) is None
+                else _strict_int(payload.get("heatmap_top_n", 40))
+            ),
         )
     except ProjectIntegrityError:
         raise
@@ -571,6 +626,10 @@ def _project_to_payload(
         "confidence_level": project.confidence_level,
         "primary_ligand_group": project.primary_ligand_group,
         "comparison_ligand_group": project.comparison_ligand_group,
+        "observation_label_mode": project.observation_label_mode,
+        "heatmap_group_by": project.heatmap_group_by,
+        "heatmap_feature_level": project.heatmap_feature_level,
+        "heatmap_top_n": project.heatmap_top_n,
     }
 
 

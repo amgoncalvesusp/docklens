@@ -29,6 +29,8 @@ def test_v1_workspace_navigation_and_ds_like_profile_are_always_available(qtbot)
     assert "Discovery Studio" in window.analysis_combo.itemText(
         window.analysis_combo.findData("ds_like")
     )
+    assert window.observation_label_combo.currentData() == "ligand"
+    assert window.observation_label_combo.isEnabled()
 
 
 def test_header_labels_are_transparent_and_high_contrast(qtbot):
@@ -130,6 +132,154 @@ def test_compare_chart_scopes_are_independent(
     assert metadata["system_a_observations"] == 2
     assert metadata["system_b_observations"] == 1
     assert "B: ligand_b.mol2" in window.chart_scope_status.text()
+
+
+def test_chart_labels_can_be_chosen_before_run_and_changed_without_redetection(
+    qtbot, multi_source_result, monkeypatch
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    calls = []
+    monkeypatch.setattr(
+        br,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    window.observation_label_combo.setCurrentIndex(
+        window.observation_label_combo.findData("file")
+    )
+    window._result = multi_source_result
+    window._refresh_tables()
+
+    assert window.observation_label_combo.currentData() == "file"
+    assert any(
+        label.get_text().startswith("ligand_a.mol2")
+        for label in window.analytics_workspace.fingerprint_panel.artifact.figure.axes[
+            0
+        ].get_yticklabels()
+    )
+
+    window.observation_label_combo.setCurrentIndex(
+        window.observation_label_combo.findData("ligand")
+    )
+
+    labels = {
+        label.get_text()
+        for label in window.analytics_workspace.fingerprint_panel.artifact.figure.axes[
+            0
+        ].get_yticklabels()
+    }
+    assert any(label.startswith("LIG-A") for label in labels)
+    assert calls == []
+
+
+def test_interaction_heatmap_compares_all_sources_or_active_observations(
+    qtbot, multi_source_result
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = multi_source_result
+    window._refresh_tables()
+    workspace = window.analytics_workspace
+
+    assert workspace.heatmap_group_combo.currentData() == "source"
+    assert tuple(workspace.interaction_heatmap_panel.artifact.data["row_label"].unique()) == (
+        "LIG-A",
+        "LIG-B",
+    )
+
+    window.primary_ligand_combo.setCurrentIndex(
+        window.primary_ligand_combo.findData("S000001")
+    )
+    workspace.heatmap_group_combo.setCurrentIndex(
+        workspace.heatmap_group_combo.findData("observation")
+    )
+
+    assert set(
+        workspace.interaction_heatmap_panel.artifact.data["observation_id"]
+    ) == {
+        "S000001:P0001:R001",
+        "S000001:P0002:R001",
+    }
+    assert "active chart scope" in workspace.heatmap_status.text().lower()
+
+
+def test_explicit_md_series_refreshes_chart_labels_and_heatmap(
+    qtbot, multi_source_result
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = multi_source_result
+    window.mode_combo.setCurrentIndex(window.mode_combo.findData("md"))
+    window.observation_label_combo.setCurrentIndex(
+        window.observation_label_combo.findData("index")
+    )
+    window._refresh_tables()
+    series = ObservationSeries(
+        mode="md",
+        points=(
+            ObservationPoint(
+                "S000002:P0001:R001",
+                0,
+                frame_index=10,
+                time_ns=1.0,
+                replica_id="B",
+            ),
+            ObservationPoint(
+                "S000001:P0001:R001",
+                1,
+                frame_index=20,
+                time_ns=2.0,
+                replica_id="A",
+            ),
+            ObservationPoint(
+                "S000001:P0002:R001",
+                2,
+                frame_index=21,
+                time_ns=2.1,
+                replica_id="A",
+            ),
+        ),
+    )
+
+    window.analytics_workspace.set_observation_series(series)
+    window.analytics_workspace.heatmap_group_combo.setCurrentIndex(
+        window.analytics_workspace.heatmap_group_combo.findData(
+            "observation"
+        )
+    )
+
+    labels = tuple(
+        label.get_text()
+        for label in window.analytics_workspace.fingerprint_panel.artifact.figure.axes[
+            0
+        ].get_yticklabels()
+    )
+    assert labels == ("Frame 10 · B", "Frame 20 · A", "Frame 21 · A")
+    assert tuple(
+        window.analytics_workspace.interaction_heatmap_panel.artifact.data[
+            "observation_id"
+        ].unique()
+    ) == series.observation_ids
+
+
+def test_source_heatmap_export_metadata_discloses_full_dataset_scope(
+    qtbot, multi_source_result
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = multi_source_result
+    window._refresh_tables()
+    window.primary_ligand_combo.setCurrentIndex(
+        window.primary_ligand_combo.findData("S000001")
+    )
+    artifact = window.analytics_workspace.interaction_heatmap_panel.artifact
+
+    metadata = window._figure_export_metadata(artifact)
+
+    assert metadata["primary_ligand_group"] == "all"
+    assert metadata["primary_selected_observations"] == 3
+    assert metadata["heatmap_group_by"] == "source"
 
 
 def test_mode_changes_scientific_labels_without_reinterpreting_raw_rows(
@@ -358,6 +508,19 @@ def test_project_round_trip_restores_ligand_chart_scope(
     original.primary_ligand_combo.setCurrentIndex(
         original.primary_ligand_combo.findData("S000002")
     )
+    original.observation_label_combo.setCurrentIndex(
+        original.observation_label_combo.findData("file")
+    )
+    original.analytics_workspace.heatmap_group_combo.setCurrentIndex(
+        original.analytics_workspace.heatmap_group_combo.findData(
+            "observation"
+        )
+    )
+    original.analytics_workspace.heatmap_feature_combo.setCurrentIndex(
+        original.analytics_workspace.heatmap_feature_combo.findData(
+            "residue"
+        )
+    )
     project_path = tmp_path / "ligand-scope.docklens"
     save_project(original._project_state(), project_path)
 
@@ -366,6 +529,15 @@ def test_project_round_trip_restores_ligand_chart_scope(
     restored._restore_project(load_project(project_path))
 
     assert restored.primary_ligand_combo.currentData() == "S000002"
+    assert restored.observation_label_combo.currentData() == "file"
+    assert (
+        restored.analytics_workspace.heatmap_group_combo.currentData()
+        == "observation"
+    )
+    assert (
+        restored.analytics_workspace.heatmap_feature_combo.currentData()
+        == "residue"
+    )
     assert (
         restored.analytics_workspace.residue_panel.artifact.metadata[
             "total_observations"

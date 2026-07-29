@@ -103,6 +103,15 @@ class ProjectControllerMixin:
             comparison_ligand_group=(
                 self.comparison_ligand_combo.currentData()
             ),
+            observation_label_mode=self._observation_label_mode(),
+            heatmap_group_by=(
+                workspace.heatmap_group_combo.currentData() or "source"
+            ),
+            heatmap_feature_level=(
+                workspace.heatmap_feature_combo.currentData()
+                or "residue_type"
+            ),
+            heatmap_top_n=workspace.heatmap_top_combo.currentData(),
         )
 
     def _save_project(self):
@@ -264,6 +273,26 @@ class ProjectControllerMixin:
             self.comparison_ligand_combo,
             project.comparison_ligand_group,
         )
+        self._set_combo_data(
+            self.observation_label_combo,
+            project.observation_label_mode,
+        )
+        self._set_combo_data(
+            workspace.heatmap_group_combo,
+            project.heatmap_group_by,
+        )
+        self._set_combo_data(
+            workspace.heatmap_feature_combo,
+            project.heatmap_feature_level,
+        )
+        self._set_combo_data(
+            workspace.heatmap_top_combo,
+            project.heatmap_top_n,
+        )
+        workspace.set_observation_label_mode(
+            project.observation_label_mode
+        )
+        workspace.refresh_heatmap()
         self._chart_scope_changed()
         workspace.select_residue(project.selected_residue)
         workspace_map = {

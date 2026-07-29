@@ -38,6 +38,10 @@ interaction persistence in one reproducible desktop workflow.
   residues.
 - Uploaded ligand files can be charted individually with independent System A
   and System B denominators; the pooled view discloses observation weighting.
+- Chart axes can use detected ligand names, uploaded filenames or pose/frame
+  indices without changing stable analytical identifiers.
+- Interaction heatmaps compare ligand/file groups with independent normalized
+  denominators or individual poses/frames with binary contact presence.
 - Docking fingerprints can form pose families; ordered MD fingerprints can
   form interaction states with descriptive transitions and representatives.
 - Tables and figures are exported for audit, collaboration and publication.
@@ -64,6 +68,9 @@ interaction persistence in one reproducible desktop workflow.
   Studio-like remain reversible without redetection.
 - Chart scopes use the uploaded source identity rather than generic ligand
   labels, preserve zero-contact observations and survive project save/open.
+- Heatmap rows never group by display text. Aggregate rows retain zero-contact
+  poses/frames in their own denominators; residue-only columns use logical
+  presence rather than summing non-exclusive interaction channels.
 - Version 1.0.0 is developed on an isolated branch and does not replace the
   current stable release until explicitly approved.
 

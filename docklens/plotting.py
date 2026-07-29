@@ -19,6 +19,7 @@ from .analytics import (
     residue_type_prevalence,
 )
 from .interaction_core import color_hex
+from .interaction_heatmap import build_interaction_heatmap_data
 from .results import RunResult
 
 
@@ -166,7 +167,10 @@ def build_residue_chart(
     )
 
 
-def _fingerprint_long(matrix: pd.DataFrame) -> pd.DataFrame:
+def _fingerprint_long(
+    matrix: pd.DataFrame,
+    labels: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
     rows = []
     observation_label = "observation_id"
     for observation_id, values in matrix.iterrows():
@@ -174,6 +178,11 @@ def _fingerprint_long(matrix: pd.DataFrame) -> pd.DataFrame:
             rows.append(
                 {
                     observation_label: observation_id,
+                    "observation_label": (
+                        labels.get(str(observation_id), str(observation_id))
+                        if labels is not None
+                        else str(observation_id)
+                    ),
                     "receptor_residue": residue,
                     "interaction_type": kind,
                     "present": bool(present),
@@ -183,6 +192,7 @@ def _fingerprint_long(matrix: pd.DataFrame) -> pd.DataFrame:
         rows,
         columns=[
             observation_label,
+            "observation_label",
             "receptor_residue",
             "interaction_type",
             "present",
@@ -195,6 +205,7 @@ def build_fingerprint_chart(
     *,
     mode: str = "docking",
     matrix: pd.DataFrame | None = None,
+    observation_labels: Mapping[str, str] | None = None,
 ) -> ChartArtifact:
     """Build an observation × interaction-feature barcode."""
     if mode not in {"docking", "md"}:
@@ -204,7 +215,7 @@ def build_fingerprint_chart(
         if matrix is not None
         else fingerprint_matrix(result)
     )
-    data = _fingerprint_long(matrix)
+    data = _fingerprint_long(matrix, observation_labels)
     figure = _figure(width=10.8, height=5.7)
     axis = figure.add_subplot(111)
     _style_axis(axis)
@@ -228,7 +239,18 @@ def build_fingerprint_chart(
         ]
         axis.set_xticks(np.arange(len(feature_labels)), labels=feature_labels)
         axis.tick_params(axis="x", labelrotation=90, labelsize=7)
-        axis.set_yticks(np.arange(len(matrix.index)), labels=matrix.index)
+        display_labels = [
+            (
+                observation_labels.get(str(value), str(value))
+                if observation_labels is not None
+                else str(value)
+            )
+            for value in matrix.index
+        ]
+        axis.set_yticks(
+            np.arange(len(matrix.index)),
+            labels=display_labels,
+        )
         axis.grid(False)
     axis.set_xlabel("Receptor residue × interaction type")
     axis.set_ylabel("Pose" if mode == "docking" else "Saved frame")
@@ -251,6 +273,7 @@ def build_similarity_chart(
     *,
     matrix: pd.DataFrame | None = None,
     similarity: pd.DataFrame | None = None,
+    observation_labels: Mapping[str, str] | None = None,
 ) -> ChartArtifact:
     """Build a Tanimoto/Jaccard similarity heatmap for observations."""
     matrix = (
@@ -267,6 +290,16 @@ def build_similarity_chart(
         {
             "observation_a": left,
             "observation_b": right,
+            "observation_a_label": (
+                observation_labels.get(str(left), str(left))
+                if observation_labels is not None
+                else str(left)
+            ),
+            "observation_b_label": (
+                observation_labels.get(str(right), str(right))
+                if observation_labels is not None
+                else str(right)
+            ),
             "tanimoto_similarity": float(similarity.loc[left, right]),
         }
         for left in similarity.index
@@ -277,6 +310,8 @@ def build_similarity_chart(
         columns=[
             "observation_a",
             "observation_b",
+            "observation_a_label",
+            "observation_b_label",
             "tanimoto_similarity",
         ],
     )
@@ -294,7 +329,14 @@ def build_similarity_chart(
             aspect="equal",
             interpolation="nearest",
         )
-        labels = similarity.index.tolist()
+        labels = [
+            (
+                observation_labels.get(str(value), str(value))
+                if observation_labels is not None
+                else str(value)
+            )
+            for value in similarity.index
+        ]
         axis.set_xticks(np.arange(len(labels)), labels=labels)
         axis.set_yticks(np.arange(len(labels)), labels=labels)
         axis.tick_params(axis="x", labelrotation=90, labelsize=7)
@@ -314,6 +356,87 @@ def build_similarity_chart(
             "total_observations": len(similarity.index),
         },
     )
+
+
+def build_interaction_heatmap_chart(
+    result: RunResult,
+    *,
+    group_by: str = "source",
+    feature_level: str = "residue_type",
+    label_mode: str = "ligand",
+    mode: str = "docking",
+    series=None,
+    top_n: int | None = 40,
+) -> ChartArtifact:
+    """Build a normalized ligand/file or observation interaction heatmap."""
+
+    heatmap = build_interaction_heatmap_data(
+        result,
+        group_by=group_by,
+        feature_level=feature_level,
+        label_mode=label_mode,
+        mode=mode,
+        series=series,
+        top_n=top_n,
+    )
+    height = min(12.0, max(4.8, 0.26 * len(heatmap.matrix.index) + 2.8))
+    figure = _figure(width=11.2, height=height)
+    axis = figure.add_subplot(111)
+    _style_axis(axis)
+    if heatmap.matrix.empty or heatmap.matrix.shape[1] == 0:
+        _empty_axis(axis, "No interaction features for this heatmap")
+    else:
+        image = axis.imshow(
+            heatmap.matrix.to_numpy(dtype=float),
+            cmap="YlGnBu",
+            vmin=0,
+            vmax=100,
+            aspect="auto",
+            interpolation="nearest",
+        )
+        feature_labels = [_feature_label(value) for value in heatmap.matrix.columns]
+        axis.set_xticks(
+            np.arange(len(feature_labels)),
+            labels=feature_labels,
+        )
+        axis.tick_params(axis="x", labelrotation=90, labelsize=7)
+        row_labels = heatmap.matrix.index.tolist()
+        tick_step = max(1, int(np.ceil(len(row_labels) / 60)))
+        tick_positions = np.arange(0, len(row_labels), tick_step)
+        axis.set_yticks(
+            tick_positions,
+            labels=[row_labels[index] for index in tick_positions],
+        )
+        axis.tick_params(axis="y", labelsize=8)
+        axis.grid(False)
+        figure.colorbar(
+            image,
+            ax=axis,
+            label="Interaction frequency / occupancy (%)",
+        )
+    axis.set_xlabel(
+        "Receptor residue × interaction type"
+        if feature_level == "residue_type"
+        else "Receptor residue (any interaction)"
+    )
+    axis.set_ylabel(
+        "Ligand / uploaded file"
+        if group_by == "source"
+        else ("Pose" if mode == "docking" else "Saved frame")
+    )
+    axis.set_title("Interaction comparison heatmap", loc="left")
+    return ChartArtifact(
+        kind="interaction-comparison-heatmap",
+        figure=figure,
+        data=heatmap.cell_data,
+        metadata=heatmap.metadata,
+    )
+
+
+def _feature_label(feature) -> str:
+    if isinstance(feature, tuple):
+        return "\n".join(str(value) for value in feature)
+    return str(feature)
 
 
 def build_comparison_chart(
@@ -441,6 +564,7 @@ __all__ = [
     "ChartArtifact",
     "build_comparison_chart",
     "build_fingerprint_chart",
+    "build_interaction_heatmap_chart",
     "build_retention_chart",
     "build_residue_chart",
     "build_similarity_chart",

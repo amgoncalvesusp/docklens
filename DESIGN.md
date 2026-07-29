@@ -216,6 +216,24 @@ metric text states whether charts show one source or a pooled,
 observation-weighted view. Scope changes update analytical charts and the Lens
 while the complete tables remain available.
 
+### Observation Identity & Interaction Heatmap
+
+The first action row exposes **Chart labels** before detection. Ligand name is
+the recommended default; uploaded filename and pose/frame index remain
+available. These values are presentation labels only. Stable observation and
+source identifiers remain the basis of filtering, joins, state analysis and
+export, and repeated display names receive a concise pose/frame suffix.
+
+Fingerprint contains a dedicated interaction comparison heatmap in addition
+to the Jaccard/Tanimoto similarity matrix. Aggregate rows compare all loaded
+ligand/uploaded-file groups, normalized by each row's own observations.
+Individual rows follow the active chart scope. Columns switch between
+residue × interaction type and any-interaction residue presence. The status
+strip always states row count, feature count, observation count, scope,
+zero-contact convention and whether the visible top-feature or hard cell limit
+was applied. Safety reductions are deterministic and recorded in exported
+metadata.
+
 Header labels on the navy top bar always render on a transparent background.
 White title text and pale-blue context text are reserved for this dark surface
 to maintain readable contrast.

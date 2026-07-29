@@ -92,8 +92,11 @@ The v1 interface has four peer workspaces:
   channel counts at most once per observation × receptor residue × interaction
   type, preventing multiple atom pairs from inflating prevalence or occupancy.
 - **Fingerprint:** binary pose/frame fingerprints, Jaccard/Tanimoto similarity,
-  deterministic complete-link pose families or interaction states, medoid
-  observations, defining contacts, population charts and an ordered ribbon.
+  an interaction comparison heatmap, deterministic complete-link pose
+  families or interaction states, medoid observations, defining contacts,
+  population charts and an ordered ribbon. The comparison heatmap can use
+  ligand/uploaded-file rows with independently normalized frequency/occupancy,
+  or individual pose/frame rows with binary presence.
   Above 300 observations, model training uses a disclosed evenly spaced
   sample; patterns outside the trained threshold remain labeled `OUTLIER`.
 - **Compare:** System B minus System A differences with independent
@@ -129,6 +132,22 @@ independent scopes. **All ligands / uploaded files** retains the pooled view;
 that view is weighted by observation count, so a ligand with more poses or
 frames contributes more to the aggregate.
 
+**Chart labels** is available before detection and selects the human-readable
+identity used on analytical axes: detected ligand name, uploaded filename or
+pose/frame index. Stable `pose_id` and `source_id` values remain unchanged and
+are retained in exported source rows. Repeated names receive a pose/frame
+suffix so multipose inputs stay unambiguous.
+
+The **Interaction comparison heatmap** uses all loaded ligand/file groups in
+its aggregate mode, even when another chart is focused on a single source.
+Each row has its own pose/frame denominator and includes zero-contact
+observations. Its individual mode follows the active chart scope. Columns can
+represent residue × interaction type or binary presence of any interaction
+with a residue; a visible top-feature limit keeps large analyses readable.
+A hard cell budget protects the desktop from oversized projects. When it is
+reached, rows are selected deterministically across the complete order and the
+reduction is stated in the status and reproducibility manifest.
+
 Analyses can be saved as versioned `.docklens` projects. A project stores the
 complete immutable result before the Complete/Discovery Studio-like view is
 applied, active settings, source SHA-256 digests and a methods record. Cached
@@ -152,12 +171,14 @@ global profile selector and are applied consistently to charts and tables.
    commas, semicolons and line breaks are accepted. DockLens reports invalid,
    unmatched and chain-ambiguous identifiers instead of silently discarding
    them.
-3. Pick the **H-bond criteria** preset (see below).
-4. Pick the **Analysis view**: Complete preserves every detected interaction;
+3. Pick **Chart labels**: ligand name, uploaded filename or pose/frame index.
+   This controls presentation only and can be changed later without rerunning.
+4. Pick the **H-bond criteria** preset (see below).
+5. Pick the **Analysis view**: Complete preserves every detected interaction;
    Discovery Studio-like is a reversible post-detection view that keeps the
    DSV interaction families and rejects salt bridges longer than 4.0 Å.
-5. **Run detection**.
-6. Explore **Residues**, **Fingerprint** and **Compare**. Choose whether the
+6. **Run detection**.
+7. Explore **Residues**, **Fingerprint** and **Compare**. Choose whether the
    observations represent docking poses or saved molecular-dynamics frames.
    Load a separate System B when a differential or retention analysis is needed.
    Use **Chart scope — ligand/file A** and **System B** to inspect or compare
@@ -166,18 +187,18 @@ global profile selector and are applied consistently to charts and tables.
    Set the saved-frame interval before interpreting MD durations. For multiple
    replicas or nonconsecutive saved frames, load the trajectory-map CSV for
    System A and, when comparing MD systems, for System B.
-7. Sort by clicking a column; filter by interaction type, search text, or
+8. Sort by clicking a column; filter by interaction type, search text, or
    "key residues only". Edit key residues any time — counts recompute without
    re-running detection.
-8. Choose the desired **Export view** in Fingerprint, then use **Export
+9. Choose the desired **Export view** in Fingerprint, then use **Export
    figure** to write that figure, its source rows and reproducibility manifest.
-9. **Export CSV** or **Export XLSX**. Choose all interactions or the current
+10. **Export CSV** or **Export XLSX**. Choose all interactions or the current
    filtered interactions; every analyzed pose remains in Summary/Matrix, with
    zero counts when no interaction survives the filter. XLSX matrices can use
    interaction counts or binary presence values. "All interactions" always
    exports the complete result; a filtered export records the selected analysis
    view in the Parameters sheet.
-10. Use **Save project** to preserve cached evidence, settings and methods;
+11. Use **Save project** to preserve cached evidence, settings and methods;
     use **Open project** to resume without redetection.
 11. **Reset** clears everything to start a new analysis.
 

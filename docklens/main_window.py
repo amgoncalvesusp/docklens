@@ -180,6 +180,19 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def _analysis_profile(self):
         return self.analysis_combo.currentData()
 
+    def _observation_label_mode(self):
+        return self.observation_label_combo.currentData() or "ligand"
+
+    def _observation_label_changed(self):
+        self.analytics_workspace.set_observation_label_mode(
+            self._observation_label_mode()
+        )
+        self.status.showMessage(
+            "Chart labels changed to %s; scientific observation IDs are "
+            "unchanged." % self.observation_label_combo.currentText()
+        )
+        self._update_lens(self.analytics_workspace.selected_residue)
+
     def _mode_changed(self):
         mode = self.mode_combo.currentData() or "docking"
         self.analytics_workspace.set_mode(mode)
@@ -349,48 +362,13 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             return
         suffix = os.path.splitext(path)[1].lower().lstrip(".")
         file_format = suffix if suffix in {"png", "svg", "pdf"} else "png"
-        primary_group = next(
-            (
-                group
-                for group in ligand_groups(self._result)
-                if group.key == self.primary_ligand_combo.currentData()
-            ),
-            None,
-        )
-        comparison_group = next(
-            (
-                group
-                for group in ligand_groups(self._comparison_result)
-                if group.key == self.comparison_ligand_combo.currentData()
-            ),
-            None,
-        ) if self._comparison_result is not None else None
         try:
             outputs = export_figure_bundle(
                 artifact,
                 path,
                 formats=(file_format,),
                 dpi=300,
-                extra_metadata={
-                    "analysis_profile": self._analysis_profile(),
-                    "hbond_preset": self._hbond_preset(),
-                    "primary_ligand_group": (
-                        primary_group.key if primary_group is not None else "all"
-                    ),
-                    "primary_ligand_source_file": (
-                        primary_group.source_file
-                        if primary_group is not None
-                        else "all"
-                    ),
-                    "primary_selected_observations": len(
-                        self.analytics_workspace._result.summaries
-                    ),
-                    "comparison_ligand_group": (
-                        comparison_group.key
-                        if comparison_group is not None
-                        else "all"
-                    ),
-                },
+                extra_metadata=self._figure_export_metadata(artifact),
             )
         except Exception:  # noqa: BLE001 - contain library errors at UI boundary
             LOGGER.exception("Publication figure export failed")
@@ -407,6 +385,70 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             "Figure, source rows and reproducibility manifest were written:\n"
             + "\n".join(outputs),
         )
+
+    def _figure_export_metadata(self, artifact):
+        primary_group = next(
+            (
+                group
+                for group in ligand_groups(self._result)
+                if group.key == self.primary_ligand_combo.currentData()
+            ),
+            None,
+        )
+        comparison_group = next(
+            (
+                group
+                for group in ligand_groups(self._comparison_result)
+                if group.key == self.comparison_ligand_combo.currentData()
+            ),
+            None,
+        ) if self._comparison_result is not None else None
+        full_source_heatmap = (
+            artifact.kind == "interaction-comparison-heatmap"
+            and artifact.metadata.get("group_by") == "source"
+        )
+        return {
+            "analysis_profile": self._analysis_profile(),
+            "hbond_preset": self._hbond_preset(),
+            "primary_ligand_group": (
+                "all"
+                if full_source_heatmap
+                else (
+                    primary_group.key
+                    if primary_group is not None
+                    else "all"
+                )
+            ),
+            "primary_ligand_source_file": (
+                "all"
+                if full_source_heatmap
+                else (
+                    primary_group.source_file
+                    if primary_group is not None
+                    else "all"
+                )
+            ),
+            "primary_selected_observations": (
+                artifact.metadata.get("total_observations", 0)
+                if full_source_heatmap
+                else len(self.analytics_workspace._result.summaries)
+            ),
+            "comparison_ligand_group": (
+                comparison_group.key
+                if comparison_group is not None
+                else "all"
+            ),
+            "observation_label_mode": self._observation_label_mode(),
+            "heatmap_group_by": (
+                self.analytics_workspace.heatmap_group_combo.currentData()
+            ),
+            "heatmap_feature_level": (
+                self.analytics_workspace.heatmap_feature_combo.currentData()
+            ),
+            "heatmap_top_n": (
+                self.analytics_workspace.heatmap_top_combo.currentData()
+            ),
+        }
 
     def _run(self):
         if not self._files:
@@ -698,6 +740,9 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self.preset_combo.setCurrentIndex(0)
         self.analysis_combo.setCurrentIndex(0)
         self.mode_combo.setCurrentIndex(0)
+        self.observation_label_combo.setCurrentIndex(
+            self.observation_label_combo.findData("ligand")
+        )
         self._syncing = False
         import pandas as pd
 

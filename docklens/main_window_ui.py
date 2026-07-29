@@ -63,7 +63,26 @@ def _toolbar(window):
     open_folder.clicked.connect(window._open_folder)
     run.clicked.connect(window._run)
     reset.clicked.connect(window._reset)
-    for button in (open_files, open_folder, run, reset):
+    for button in (open_files, open_folder):
+        action_row.addWidget(button)
+    action_row.addWidget(QtWidgets.QLabel("Chart labels:"))
+    window.observation_label_combo = QtWidgets.QComboBox()
+    window.observation_label_combo.addItem(
+        "Ligand name (recommended)", "ligand"
+    )
+    window.observation_label_combo.addItem("Uploaded file name", "file")
+    window.observation_label_combo.addItem(
+        "Pose / frame index", "index"
+    )
+    window.observation_label_combo.setToolTip(
+        "Choose how observations appear in charts. Scientific IDs remain "
+        "unchanged in calculations and exports."
+    )
+    window.observation_label_combo.currentIndexChanged.connect(
+        window._observation_label_changed
+    )
+    action_row.addWidget(window.observation_label_combo)
+    for button in (run, reset):
         action_row.addWidget(button)
     action_row.addSpacing(16)
     action_row.addWidget(QtWidgets.QLabel("Criteria:"))
