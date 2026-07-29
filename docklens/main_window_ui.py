@@ -23,20 +23,36 @@ def _header(window, resource_path):
     titles = QtWidgets.QVBoxLayout()
     title = QtWidgets.QLabel("DockLens 1.0")
     title.setObjectName("title")
+    title_palette = title.palette()
+    title_palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor("#FFFFFF"))
+    title.setPalette(title_palette)
+    window.brand_title = title
     subtitle = QtWidgets.QLabel("Reciprocal-space interaction atlas")
     subtitle.setObjectName("subtitle")
+    subtitle_palette = subtitle.palette()
+    subtitle_palette.setColor(
+        QtGui.QPalette.WindowText, QtGui.QColor("#DCE7EE")
+    )
+    subtitle.setPalette(subtitle_palette)
+    window.brand_subtitle = subtitle
     titles.addWidget(title)
     titles.addWidget(subtitle)
     bar.addLayout(titles)
     bar.addStretch(1)
     window.dataset_context = QtWidgets.QLabel("No dataset loaded")
-    window.dataset_context.setObjectName("subtitle")
+    window.dataset_context.setObjectName("datasetContext")
+    context_palette = window.dataset_context.palette()
+    context_palette.setColor(
+        QtGui.QPalette.WindowText, QtGui.QColor("#DCE7EE")
+    )
+    window.dataset_context.setPalette(context_palette)
     bar.addWidget(window.dataset_context)
     return bar
 
 
 def _toolbar(window):
-    layout = QtWidgets.QHBoxLayout()
+    layout = QtWidgets.QVBoxLayout()
+    action_row = QtWidgets.QHBoxLayout()
     open_files = QtWidgets.QPushButton("Open files")
     open_folder = QtWidgets.QPushButton("Open folder")
     run = QtWidgets.QPushButton("Run detection")
@@ -48,44 +64,81 @@ def _toolbar(window):
     run.clicked.connect(window._run)
     reset.clicked.connect(window._reset)
     for button in (open_files, open_folder, run, reset):
-        layout.addWidget(button)
-    layout.addSpacing(16)
-    layout.addWidget(QtWidgets.QLabel("Criteria:"))
+        action_row.addWidget(button)
+    action_row.addSpacing(16)
+    action_row.addWidget(QtWidgets.QLabel("Criteria:"))
     window.preset_combo = QtWidgets.QComboBox()
     window.preset_combo.addItem("PLIP (default)", "plip")
     window.preset_combo.addItem(
         "DS-calibrated beta (explicit-H geometry)", "dsv"
     )
-    layout.addWidget(window.preset_combo)
-    layout.addSpacing(12)
-    layout.addWidget(QtWidgets.QLabel("Evidence:"))
+    action_row.addWidget(window.preset_combo)
+    action_row.addSpacing(12)
+    action_row.addWidget(QtWidgets.QLabel("Evidence:"))
     window.mode_combo = QtWidgets.QComboBox()
     window.mode_combo.addItem("Docking poses", "docking")
     window.mode_combo.addItem("Molecular dynamics frames", "md")
     window.mode_combo.currentIndexChanged.connect(window._mode_changed)
-    layout.addWidget(window.mode_combo)
-    layout.addSpacing(12)
-    layout.addWidget(QtWidgets.QLabel("Profile:"))
+    action_row.addWidget(window.mode_combo)
+    action_row.addSpacing(12)
+    action_row.addWidget(QtWidgets.QLabel("Profile:"))
     window.analysis_combo = QtWidgets.QComboBox()
     window.analysis_combo.addItem("Complete", "complete")
     window.analysis_combo.addItem(
         "Discovery Studio-like", "ds_like"
     )
     window.analysis_combo.currentIndexChanged.connect(window._refresh_tables)
-    layout.addWidget(window.analysis_combo)
-    layout.addStretch(1)
+    action_row.addWidget(window.analysis_combo)
+    action_row.addStretch(1)
     comparison = QtWidgets.QPushButton("Load system B")
     comparison.clicked.connect(window._load_comparison)
-    layout.addWidget(comparison)
+    action_row.addWidget(comparison)
+    layout.addLayout(action_row)
+
+    scope_row = QtWidgets.QHBoxLayout()
+    scope_row.addWidget(QtWidgets.QLabel("Chart scope — ligand/file A:"))
+    window.primary_ligand_combo = QtWidgets.QComboBox()
+    window.primary_ligand_combo.setMinimumContentsLength(18)
+    window.primary_ligand_combo.setSizeAdjustPolicy(
+        QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon
+    )
+    window.primary_ligand_combo.addItem(
+        "All ligands / uploaded files", None
+    )
+    window.primary_ligand_combo.setEnabled(False)
+    window.primary_ligand_combo.currentIndexChanged.connect(
+        window._chart_scope_changed
+    )
+    scope_row.addWidget(window.primary_ligand_combo)
+    scope_row.addWidget(QtWidgets.QLabel("System B:"))
+    window.comparison_ligand_combo = QtWidgets.QComboBox()
+    window.comparison_ligand_combo.setMinimumContentsLength(16)
+    window.comparison_ligand_combo.setSizeAdjustPolicy(
+        QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon
+    )
+    window.comparison_ligand_combo.addItem(
+        "All ligands / uploaded files", None
+    )
+    window.comparison_ligand_combo.setEnabled(False)
+    window.comparison_ligand_combo.currentIndexChanged.connect(
+        window._chart_scope_changed
+    )
+    scope_row.addWidget(window.comparison_ligand_combo)
+    window.chart_scope_status = QtWidgets.QLabel(
+        "Charts use all loaded observations."
+    )
+    window.chart_scope_status.setObjectName("workspaceDescription")
+    scope_row.addWidget(window.chart_scope_status, 1)
     window.export_figure_button = QtWidgets.QPushButton("Export figure")
     window.export_figure_button.clicked.connect(window._export_figure)
-    layout.addWidget(window.export_figure_button)
+    scope_row.addWidget(window.export_figure_button)
     export_csv = QtWidgets.QPushButton("CSV")
     export_xlsx = QtWidgets.QPushButton("XLSX")
     export_csv.clicked.connect(window._export_csv)
     export_xlsx.clicked.connect(window._export_xlsx)
-    layout.addWidget(export_csv)
-    layout.addWidget(export_xlsx)
+    scope_row.addWidget(export_csv)
+    scope_row.addWidget(export_xlsx)
+    layout.addLayout(scope_row)
     return layout
 
 
@@ -317,7 +370,23 @@ def build_main_window_ui(window, resource_path):
     context_layout = _toolbar(window)
     context_layout.setContentsMargins(14, 8, 14, 8)
     context_bar.setLayout(context_layout)
-    root.addWidget(context_bar)
+    context_bar.setMinimumWidth(context_bar.sizeHint().width())
+    context_scroll = QtWidgets.QScrollArea()
+    context_scroll.setObjectName("contextScroll")
+    context_scroll.setWidgetResizable(True)
+    context_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+    context_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+    context_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+    context_scroll.setWidget(context_bar)
+    context_scroll.setFixedHeight(
+        context_bar.sizeHint().height()
+        + context_scroll.style().pixelMetric(
+            QtWidgets.QStyle.PM_ScrollBarExtent
+        )
+        + 2
+    )
+    window.context_scroll_area = context_scroll
+    root.addWidget(context_scroll)
     window.analytics_workspace = AnalyticsWorkspace(window)
     window.analytics_workspace.residueSelected.connect(window._update_lens)
     window.analytics_workspace.representativeSelected.connect(

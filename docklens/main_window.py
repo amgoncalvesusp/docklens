@@ -22,6 +22,7 @@ from . import export
 from .analysis_profiles import build_analysis_view
 from .figure_export import export_figure_bundle
 from .integration_result import write_integration_result
+from .ligand_selection import ligand_groups
 from .main_window_ui import build_main_window_ui
 from .project_controller import ProjectControllerMixin
 from .residue_keys import match_key_residues, parse_key_residues
@@ -41,8 +42,13 @@ _STYLE = f"""
 * {{ font-family: 'Aptos', 'Segoe UI Variable', 'Segoe UI', 'Noto Sans', sans-serif; }}
 QMainWindow, QWidget {{ background: {OFFWHITE}; color: #142330; font-size: 12px; }}
 QWidget#topBar, QWidget#navigationRail {{ background: {BLUE}; }}
-QLabel#title {{ color: white; font-size: 20px; font-weight: 700; }}
-QLabel#subtitle {{ color: #B7C9D8; font-size: 11px; font-weight: 400; }}
+QWidget#topBar QLabel {{ background: transparent; }}
+QWidget#topBar QLabel#title {{
+    background: transparent; color: #FFFFFF; font-size: 20px; font-weight: 700;
+}}
+QWidget#topBar QLabel#subtitle, QWidget#topBar QLabel#datasetContext {{
+    background: transparent; color: #DCE7EE; font-size: 11px; font-weight: 400;
+}}
 QLabel#credit {{ color: {GRAY}; font-size: 11px; }}
 QLabel#workspaceTitle {{ color: #101C26; font-size: 20px; font-weight: 700; }}
 QLabel#workspaceDescription {{ color: {GRAY}; font-size: 12px; }}
@@ -150,6 +156,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         if files:
             self._files = list(files)
             self.analytics_workspace.clear_observation_series()
+            self._clear_ligand_scopes()
             self._project_stale = False
             self.run_detection_button.setEnabled(True)
             self.status.showMessage("%d file(s) selected." % len(files))
@@ -159,6 +166,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         if folder:
             self._files = [folder]
             self.analytics_workspace.clear_observation_series()
+            self._clear_ligand_scopes()
             self._project_stale = False
             self.run_detection_button.setEnabled(True)
             self.status.showMessage("Folder selected: %s" % folder)
@@ -176,6 +184,110 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         mode = self.mode_combo.currentData() or "docking"
         self.analytics_workspace.set_mode(mode)
         self._update_lens(self.analytics_workspace.selected_residue)
+
+    def _populate_ligand_combo(self, combo, result, selected):
+        groups = ligand_groups(result) if result is not None else ()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("All ligands / uploaded files", None)
+        for group in groups:
+            combo.addItem(group.label, group.key)
+            index = combo.count() - 1
+            combo.setItemData(index, group.source_path, QtCore.Qt.ToolTipRole)
+        target = combo.findData(selected)
+        combo.setCurrentIndex(target if target >= 0 else 0)
+        combo.setEnabled(len(groups) > 1)
+        combo.blockSignals(False)
+
+    def _refresh_ligand_selectors(self, primary, comparison):
+        primary_selected = self.primary_ligand_combo.currentData()
+        comparison_selected = self.comparison_ligand_combo.currentData()
+        self._populate_ligand_combo(
+            self.primary_ligand_combo, primary, primary_selected
+        )
+        self._populate_ligand_combo(
+            self.comparison_ligand_combo,
+            comparison,
+            comparison_selected,
+        )
+
+    def _chart_scope_changed(self):
+        if self._result is None:
+            return
+        workspace = self.analytics_workspace
+        workspace.set_ligand_group(
+            self.primary_ligand_combo.currentData()
+        )
+        workspace.set_ligand_group(
+            self.comparison_ligand_combo.currentData(),
+            comparison=True,
+        )
+        primary_group = next(
+            (
+                group
+                for group in ligand_groups(
+                    build_analysis_view(
+                        self._result, self._analysis_profile()
+                    )
+                )
+                if group.key == self.primary_ligand_combo.currentData()
+            ),
+            None,
+        )
+        comparison_group = (
+            next(
+                (
+                    group
+                    for group in ligand_groups(self._comparison_result)
+                    if group.key
+                    == self.comparison_ligand_combo.currentData()
+                ),
+                None,
+            )
+            if self._comparison_result is not None
+            else None
+        )
+        if primary_group is None:
+            count = len(ligand_groups(self._result))
+            primary_text = (
+                f"A: all {count} group(s), observation-weighted"
+            )
+        else:
+            primary_text = (
+                f"A: {primary_group.source_file} · "
+                f"{primary_group.observation_count} selected observation(s)"
+            )
+        if self._comparison_result is None:
+            comparison_text = "B: not loaded"
+        elif comparison_group is None:
+            comparison_text = (
+                f"B: all {len(ligand_groups(self._comparison_result))} "
+                "group(s)"
+            )
+        else:
+            comparison_text = (
+                f"B: {comparison_group.source_file} · "
+                f"{comparison_group.observation_count} observation(s)"
+            )
+        self.chart_scope_status.setText(
+            primary_text + " · " + comparison_text
+        )
+        self._update_lens(workspace.selected_residue)
+
+    def _clear_ligand_scopes(self, *, comparison_only=False):
+        combos = (
+            (self.comparison_ligand_combo,)
+            if comparison_only
+            else (
+                self.primary_ligand_combo,
+                self.comparison_ligand_combo,
+            )
+        )
+        for combo in combos:
+            combo.blockSignals(True)
+            if combo.count():
+                combo.setCurrentIndex(0)
+            combo.blockSignals(False)
 
     def _load_comparison(self):
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -203,6 +315,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             return
         self._comparison_result = comparison
         self._comparison_files = list(files)
+        self._clear_ligand_scopes(comparison_only=True)
         self.analytics_workspace.set_observation_series(
             None, comparison=True, refresh=False
         )
@@ -236,6 +349,22 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             return
         suffix = os.path.splitext(path)[1].lower().lstrip(".")
         file_format = suffix if suffix in {"png", "svg", "pdf"} else "png"
+        primary_group = next(
+            (
+                group
+                for group in ligand_groups(self._result)
+                if group.key == self.primary_ligand_combo.currentData()
+            ),
+            None,
+        )
+        comparison_group = next(
+            (
+                group
+                for group in ligand_groups(self._comparison_result)
+                if group.key == self.comparison_ligand_combo.currentData()
+            ),
+            None,
+        ) if self._comparison_result is not None else None
         try:
             outputs = export_figure_bundle(
                 artifact,
@@ -245,6 +374,22 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
                 extra_metadata={
                     "analysis_profile": self._analysis_profile(),
                     "hbond_preset": self._hbond_preset(),
+                    "primary_ligand_group": (
+                        primary_group.key if primary_group is not None else "all"
+                    ),
+                    "primary_ligand_source_file": (
+                        primary_group.source_file
+                        if primary_group is not None
+                        else "all"
+                    ),
+                    "primary_selected_observations": len(
+                        self.analytics_workspace._result.summaries
+                    ),
+                    "comparison_ligand_group": (
+                        comparison_group.key
+                        if comparison_group is not None
+                        else "all"
+                    ),
                 },
             )
         except Exception:  # noqa: BLE001 - contain library errors at UI boundary
@@ -332,6 +477,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self.key_edit.setText(" ".join(manifest.key_residues))
         self._files = [str(manifest.receptor_path), str(manifest.poses_path)]
         self.analytics_workspace.clear_observation_series()
+        self._clear_ligand_scopes()
         self._launch_manifest = manifest
         try:
             self._result = br.run_paired(
@@ -393,6 +539,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self.coverage_model.set_dataframe(export.key_residue_coverage_dataframe(view))
         self.detail_model.set_dataframe(export.detail_dataframe(view))
         self.analytics_workspace.set_result(view)
+        comparison_view = None
         if self._comparison_result is not None:
             comparison_view = build_analysis_view(
                 self._comparison_result, self._analysis_profile()
@@ -400,6 +547,8 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             self.analytics_workspace.set_comparison(comparison_view)
         else:
             self.analytics_workspace.set_comparison(None)
+        self._refresh_ligand_selectors(view, comparison_view)
+        self._chart_scope_changed()
         self.lens_profile.setText(
             "Profile: %s\nCounting unit: one presence per observation, "
             "residue and interaction type"
@@ -558,6 +707,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self.analytics_workspace.set_comparison(None)
         self.analytics_workspace.clear_observation_series()
         self.analytics_workspace.set_result(None)
+        self._clear_ligand_scopes()
         self.save_project_button.setEnabled(False)
         self.run_detection_button.setEnabled(True)
         self._project_stale = False

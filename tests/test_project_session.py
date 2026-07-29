@@ -95,6 +95,8 @@ def _project(source):
         bootstrap_block_size=4,
         bootstrap_seed=77,
         confidence_level=0.95,
+        primary_ligand_group="source-1",
+        comparison_ligand_group=None,
     )
 
 
@@ -113,6 +115,7 @@ def test_project_round_trip_preserves_settings_hashes_and_methods(tmp_path):
     assert validate_project_inputs(loaded) == ()
     assert loaded.primary.result == project.primary.result
     assert loaded.primary.observation_series == project.primary.observation_series
+    assert loaded.primary_ligand_group == "source-1"
 
 
 def test_project_detects_missing_or_changed_sources(tmp_path):
@@ -149,6 +152,32 @@ def test_project_loader_rejects_oversized_unknown_or_invalid_documents(tmp_path)
         load_project(malformed)
 
 
+def test_schema_one_project_migrates_to_all_ligand_groups(tmp_path):
+    source = tmp_path / "frames.pdb"
+    source.write_text("MODEL 1\nENDMDL\n", encoding="utf-8")
+    current = tmp_path / "current.docklens"
+    save_project(_project(source), current)
+    with zipfile.ZipFile(current, "r") as archive:
+        members = {
+            item.filename: archive.read(item.filename)
+            for item in archive.infolist()
+        }
+    manifest = json.loads(members["manifest.json"])
+    manifest["schema_version"] = "1"
+    manifest["project"].pop("primary_ligand_group", None)
+    manifest["project"].pop("comparison_ligand_group", None)
+    members["manifest.json"] = json.dumps(manifest).encode("utf-8")
+    legacy = tmp_path / "legacy.docklens"
+    with zipfile.ZipFile(legacy, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+
+    loaded = load_project(legacy)
+
+    assert loaded.primary_ligand_group is None
+    assert loaded.comparison_ligand_group is None
+
+
 def test_methods_summary_discloses_counting_state_and_bootstrap_assumptions(tmp_path):
     source = tmp_path / "poses.mol2"
     source.write_text("@<TRIPOS>MOLECULE\n", encoding="utf-8")
@@ -163,6 +192,8 @@ def test_methods_summary_discloses_counting_state_and_bootstrap_assumptions(tmp_
     assert "seed 77" in text
     assert "95.0% confidence" in text
     assert "1 replica" in text
+    assert "Primary chart scope" in text
+    assert "poses.mol2" in text
 
 
 def test_comparison_series_round_trip_and_methods_are_disclosed(tmp_path):

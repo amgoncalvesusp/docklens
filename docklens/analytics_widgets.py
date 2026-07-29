@@ -27,6 +27,12 @@ from .dynamic_states import (
     state_summary_frame,
 )
 from .dynamic_ui import build_dynamic_analysis
+from .ligand_selection import (
+    default_md_series_for_result,
+    ligand_groups,
+    subset_observation_series,
+    subset_run_result,
+)
 from .observation_series import (
     ObservationSeries,
     observation_series_from_dataframe,
@@ -117,8 +123,12 @@ class AnalyticsWorkspace(QtCore.QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._result: RunResult = make_result()
+        self._source_result: RunResult = self._result
         self._tasks = AnalysisTaskRunner(self)
         self._comparison: RunResult | None = None
+        self._source_comparison: RunResult | None = None
+        self._ligand_group: str | None = None
+        self._comparison_ligand_group: str | None = None
         self._series: ObservationSeries | None = None
         self._comparison_series: ObservationSeries | None = None
         self._mode = "docking"
@@ -318,14 +328,52 @@ class AnalyticsWorkspace(QtCore.QObject):
         return self._selected_residue
 
     def set_result(self, result: RunResult | None):
-        self._result = result or make_result()
+        self._source_result = result or make_result()
+        valid_groups = {
+            group.key for group in ligand_groups(self._source_result)
+        }
+        if self._ligand_group not in valid_groups:
+            self._ligand_group = None
+        self._result = subset_run_result(
+            self._source_result, self._ligand_group
+        )
         self.refresh()
 
     def set_comparison(self, result: RunResult | None):
-        self._comparison = result
+        self._source_comparison = result
         if result is None:
             self._comparison_series = None
+            self._comparison_ligand_group = None
+            self._comparison = None
+        else:
+            valid_groups = {group.key for group in ligand_groups(result)}
+            if self._comparison_ligand_group not in valid_groups:
+                self._comparison_ligand_group = None
+            self._comparison = subset_run_result(
+                result, self._comparison_ligand_group
+            )
         self.refresh_compare()
+
+    def set_ligand_group(
+        self,
+        group_key: str | None,
+        *,
+        comparison: bool = False,
+    ):
+        if comparison:
+            if self._source_comparison is None:
+                self._comparison_ligand_group = None
+                self._comparison = None
+            else:
+                self._comparison = subset_run_result(
+                    self._source_comparison, group_key
+                )
+                self._comparison_ligand_group = group_key
+            self.refresh_compare()
+            return
+        self._result = subset_run_result(self._source_result, group_key)
+        self._ligand_group = group_key
+        self.refresh()
 
     def set_observation_series(
         self,
@@ -341,7 +389,11 @@ class AnalyticsWorkspace(QtCore.QObject):
             target_result = (
                 result
                 if result is not None
-                else (self._comparison if comparison else self._result)
+                else (
+                    self._source_comparison
+                    if comparison
+                    else self._source_result
+                )
             )
             matrix = fingerprint_matrix(target_result)
             if set(series.observation_ids) != set(matrix.index):
@@ -386,7 +438,9 @@ class AnalyticsWorkspace(QtCore.QObject):
             if source.size() > 32 * 1024 * 1024:
                 raise ValueError("trajectory map exceeds 32 MB")
             matrix = fingerprint_matrix(
-                self._comparison if comparison else self._result
+                self._source_comparison
+                if comparison
+                else self._source_result
             )
             frame = pd.read_csv(path)
             if len(frame) > 2_000_000:
@@ -419,6 +473,21 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.time_step_spin.setEnabled(mode == "md")
         self.load_trajectory_map_button.setEnabled(mode == "md")
         self.refresh()
+
+    def _active_md_series(self, *, comparison=False):
+        result = self._comparison if comparison else self._result
+        if result is None:
+            return None
+        explicit = (
+            self._comparison_series if comparison else self._series
+        )
+        observation_ids = fingerprint_matrix(result).index
+        if explicit is not None:
+            return subset_observation_series(explicit, observation_ids)
+        return default_md_series_for_result(
+            result,
+            time_step_ns=self.time_step_spin.value(),
+        )
 
     def select_residue(self, residue: str):
         residue = str(residue or "")
@@ -547,7 +616,11 @@ class AnalyticsWorkspace(QtCore.QObject):
             context,
             threshold=self.state_threshold_spin.value(),
             max_training_observations=_MAX_SIMILARITY_OBSERVATIONS,
-            series=self._series,
+            series=(
+                self._active_md_series()
+                if self._mode == "md"
+                else None
+            ),
         )
         self.state_population_panel.set_artifact(
             build_state_population_chart(self.state_analysis)
@@ -621,8 +694,9 @@ class AnalyticsWorkspace(QtCore.QObject):
                 f"{'replica' if replicas == 1 else 'replicas'}, "
                 f"{max(gaps, 0)} frame gap(s)."
                 if self._series is not None
-                else "Implicit single contiguous series; load a trajectory "
-                "map to declare replicas or gaps."
+                else f"Automatic file boundaries: {replicas} "
+                f"{'series' if replicas == 1 else 'series'}; load a "
+                "trajectory map to declare replicas or gaps explicitly."
             )
         else:
             map_note = ""
@@ -694,7 +768,7 @@ class AnalyticsWorkspace(QtCore.QObject):
             ),
             seed=self.bootstrap_seed,
             confidence_level=self.confidence_level,
-            series=self._series,
+            series=self._active_md_series(),
             on_success=self._uncertainty_ready,
             on_error=self._uncertainty_failed,
             on_settled=self._uncertainty_settled,
@@ -805,8 +879,8 @@ class AnalyticsWorkspace(QtCore.QObject):
             ),
             seed=self.bootstrap_seed,
             confidence_level=self.confidence_level,
-            series_a=self._series,
-            series_b=self._comparison_series,
+            series_a=self._active_md_series(),
+            series_b=self._active_md_series(comparison=True),
             on_success=self._comparison_uncertainty_ready,
             on_error=self._comparison_uncertainty_failed,
             on_settled=self._comparison_uncertainty_settled,
@@ -908,7 +982,7 @@ class AnalyticsWorkspace(QtCore.QObject):
                 for item in episode_statistics(
                     self._result,
                     AnalysisContext(mode="md"),
-                    series=self._series,
+                    series=self._active_md_series(),
                 )
                 if item.receptor_residue == residue
             ]

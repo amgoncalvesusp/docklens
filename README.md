@@ -120,6 +120,15 @@ The block length, seed, confidence level, number of resamples and any
 short-trajectory warning are retained with the plotted rows. Docking data never
 uses temporal transition or block-bootstrap terminology.
 
+The **Chart scope — ligand/file** selectors distinguish uploaded ligand
+sources by their internal `source_id`, even when different files contain the
+same generic ligand label such as `LIG` or `RES1`. Selecting a source
+recalculates every analytical chart from all its poses or frames, including
+observations with zero surviving interactions. System A and System B have
+independent scopes. **All ligands / uploaded files** retains the pooled view;
+that view is weighted by observation count, so a ligand with more poses or
+frames contributes more to the aggregate.
+
 Analyses can be saved as versioned `.docklens` projects. A project stores the
 complete immutable result before the Complete/Discovery Studio-like view is
 applied, active settings, source SHA-256 digests and a methods record. Cached
@@ -151,6 +160,8 @@ global profile selector and are applied consistently to charts and tables.
 6. Explore **Residues**, **Fingerprint** and **Compare**. Choose whether the
    observations represent docking poses or saved molecular-dynamics frames.
    Load a separate System B when a differential or retention analysis is needed.
+   Use **Chart scope — ligand/file A** and **System B** to inspect or compare
+   individual uploaded ligands without removing other results from the tables.
    Fingerprint contains population, timeline, transition and confidence tabs.
    Set the saved-frame interval before interpreting MD durations. For multiple
    replicas or nonconsecutive saved frames, load the trajectory-map CSV for

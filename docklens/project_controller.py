@@ -99,6 +99,10 @@ class ProjectControllerMixin:
             ),
             bootstrap_seed=workspace.bootstrap_seed,
             confidence_level=workspace.confidence_level,
+            primary_ligand_group=self.primary_ligand_combo.currentData(),
+            comparison_ligand_group=(
+                self.comparison_ligand_combo.currentData()
+            ),
         )
 
     def _save_project(self):
@@ -252,6 +256,15 @@ class ProjectControllerMixin:
             )
         self._populate_residue_list()
         self._refresh_tables()
+        self._set_combo_data(
+            self.primary_ligand_combo,
+            project.primary_ligand_group,
+        )
+        self._set_combo_data(
+            self.comparison_ligand_combo,
+            project.comparison_ligand_group,
+        )
+        self._chart_scope_changed()
         workspace.select_residue(project.selected_residue)
         workspace_map = {
             name: index for index, name in enumerate(_WORKSPACES)

@@ -36,6 +36,8 @@ interaction persistence in one reproducible desktop workflow.
   details and matrices.
 - Researchers compare ligands, poses, time ranges, trajectories and key
   residues.
+- Uploaded ligand files can be charted individually with independent System A
+  and System B denominators; the pooled view discloses observation weighting.
 - Docking fingerprints can form pose families; ordered MD fingerprints can
   form interaction states with descriptive transitions and representatives.
 - Tables and figures are exported for audit, collaboration and publication.
@@ -60,6 +62,8 @@ interaction persistence in one reproducible desktop workflow.
   time values and must survive project save/open.
 - Saved projects retain the unprofiled result so Complete and Discovery
   Studio-like remain reversible without redetection.
+- Chart scopes use the uploaded source identity rather than generic ligand
+  labels, preserve zero-contact observations and survive project save/open.
 - Version 1.0.0 is developed on an isolated branch and does not replace the
   current stable release until explicitly approved.
 

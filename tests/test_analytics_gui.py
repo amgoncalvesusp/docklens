@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import time
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from docklens import batch_runner as br
 from docklens.analytics_widgets import AnalyticsWorkspace, ChartPanel
@@ -28,6 +28,29 @@ def test_v1_workspace_navigation_and_ds_like_profile_are_always_available(qtbot)
     assert window.analysis_combo.findData("ds_like") >= 0
     assert "Discovery Studio" in window.analysis_combo.itemText(
         window.analysis_combo.findData("ds_like")
+    )
+
+
+def test_header_labels_are_transparent_and_high_contrast(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    QtWidgets.QApplication.processEvents()
+
+    assert window.brand_title.objectName() == "title"
+    assert window.dataset_context.objectName() == "datasetContext"
+    assert "QWidget#topBar QLabel { background: transparent; }" in (
+        window.styleSheet()
+    )
+    assert (
+        window.brand_title.palette().color(QtGui.QPalette.WindowText).name()
+        == "#ffffff"
+    )
+    assert (
+        window.brand_subtitle.palette()
+        .color(QtGui.QPalette.WindowText)
+        .name()
+        == "#dce7ee"
     )
 
 
@@ -54,6 +77,59 @@ def test_analytics_refreshes_from_the_same_profiled_result_as_tables(
     assert artifact is not None
     assert artifact.metadata["total_observations"] == len(window._result.summaries)
     assert len(artifact.data) > 0
+
+
+def test_chart_scope_filters_all_primary_graphs_by_uploaded_ligand_file(
+    qtbot, multi_source_result
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = multi_source_result
+    window._refresh_tables()
+
+    assert window.primary_ligand_combo.count() == 3
+    assert window.primary_ligand_combo.itemData(0) is None
+    assert "All ligands" in window.primary_ligand_combo.itemText(0)
+    assert window.summary_model.rowCount() == 3
+
+    window.primary_ligand_combo.setCurrentIndex(
+        window.primary_ligand_combo.findData("S000001")
+    )
+
+    workspace = window.analytics_workspace
+    assert workspace.residue_panel.artifact.metadata["total_observations"] == 2
+    assert tuple(workspace._fingerprint_matrix.index) == (
+        "S000001:P0001:R001",
+        "S000001:P0002:R001",
+    )
+    assert workspace.state_analysis.series.observation_ids == (
+        "S000001:P0001:R001",
+        "S000001:P0002:R001",
+    )
+    assert window.summary_model.rowCount() == 3
+    assert "ligand_a.mol2" in window.chart_scope_status.text()
+
+
+def test_compare_chart_scopes_are_independent(
+    qtbot, multi_source_result
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = multi_source_result
+    window._comparison_result = multi_source_result
+    window._refresh_tables()
+
+    window.primary_ligand_combo.setCurrentIndex(
+        window.primary_ligand_combo.findData("S000001")
+    )
+    window.comparison_ligand_combo.setCurrentIndex(
+        window.comparison_ligand_combo.findData("S000002")
+    )
+
+    metadata = window.analytics_workspace.compare_panel.artifact.metadata
+    assert metadata["system_a_observations"] == 2
+    assert metadata["system_b_observations"] == 1
+    assert "B: ligand_b.mol2" in window.chart_scope_status.text()
 
 
 def test_mode_changes_scientific_labels_without_reinterpreting_raw_rows(
@@ -272,6 +348,32 @@ def test_project_round_trip_restores_profile_mode_workspace_and_cached_result(
     assert restored.save_project_button.isEnabled()
 
 
+def test_project_round_trip_restores_ligand_chart_scope(
+    qtbot, multi_source_result, tmp_path
+):
+    original = MainWindow()
+    qtbot.addWidget(original)
+    original._result = multi_source_result
+    original._refresh_tables()
+    original.primary_ligand_combo.setCurrentIndex(
+        original.primary_ligand_combo.findData("S000002")
+    )
+    project_path = tmp_path / "ligand-scope.docklens"
+    save_project(original._project_state(), project_path)
+
+    restored = MainWindow()
+    qtbot.addWidget(restored)
+    restored._restore_project(load_project(project_path))
+
+    assert restored.primary_ligand_combo.currentData() == "S000002"
+    assert (
+        restored.analytics_workspace.residue_panel.artifact.metadata[
+            "total_observations"
+        ]
+        == 1
+    )
+
+
 def test_explicit_series_reaches_states_bootstrap_and_evidence(qtbot, fixture_path):
     result = br.run([fixture_path("minimal_complex.pdb")])
     workspace = AnalyticsWorkspace()
@@ -374,6 +476,12 @@ def test_project_actions_remain_scrollable_in_a_short_window(qtbot):
         QtCore.Qt.ScrollBarAsNeeded
     )
     assert window.nav_scroll_area.verticalScrollBar().maximum() > 0
+    assert window.context_scroll_area.horizontalScrollBarPolicy() == (
+        QtCore.Qt.ScrollBarAsNeeded
+    )
+    assert (
+        window.context_scroll_area.horizontalScrollBar().maximum() > 0
+    )
 
 
 def test_stale_comparison_task_cannot_reopen_interval_panel(

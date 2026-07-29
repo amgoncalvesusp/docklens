@@ -19,6 +19,7 @@ from typing import Any, Mapping
 import zipfile
 
 from .observation_series import ObservationPoint, ObservationSeries
+from .ligand_selection import ligand_groups
 from .results import (
     AnalysisParameters,
     Detail,
@@ -28,7 +29,8 @@ from .results import (
     Summary,
 )
 
-PROJECT_SCHEMA_VERSION = "1"
+PROJECT_SCHEMA_VERSION = "2"
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2"})
 MAX_PROJECT_BYTES = 5 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 8
@@ -132,6 +134,8 @@ class ProjectState:
     bootstrap_block_size: int | None = None
     bootstrap_seed: int = 2026
     confidence_level: float = 0.95
+    primary_ligand_group: str | None = None
+    comparison_ligand_group: str | None = None
 
     def __post_init__(self) -> None:
         threshold = float(self.state_threshold)
@@ -158,6 +162,13 @@ class ProjectState:
         object.__setattr__(self, "bootstrap_block_size", block_size)
         object.__setattr__(self, "bootstrap_seed", seed)
         object.__setattr__(self, "confidence_level", confidence)
+        for name in ("primary_ligand_group", "comparison_ligand_group"):
+            value = getattr(self, name)
+            if value is not None and not str(value):
+                raise ValueError(f"{name} must be non-empty or None")
+            object.__setattr__(
+                self, name, None if value is None else str(value)
+            )
         object.__setattr__(self, "key_residues", tuple(self.key_residues))
         object.__setattr__(self, "selected_types", tuple(self.selected_types))
 
@@ -237,6 +248,18 @@ def methods_summary(project: ProjectState) -> str:
         if project.comparison is not None
         else ""
     )
+    primary_scope = _ligand_scope_summary(
+        project.primary, project.primary_ligand_group
+    )
+    comparison_scope = (
+        "\nSystem B chart scope: "
+        + _ligand_scope_summary(
+            project.comparison, project.comparison_ligand_group
+        )
+        + "."
+        if project.comparison is not None
+        else ""
+    )
     return (
         "DockLens reproducible analysis\n"
         "Application version: {version}\n"
@@ -245,6 +268,7 @@ def methods_summary(project: ProjectState) -> str:
         "Primary dataset: {label} ({mode}).{comparison}\n"
         "Primary observation axis: {time_axis}.\n"
         "Trajectory mapping: {axis_source}.{comparison_axis}\n"
+        "Primary chart scope: {primary_scope}.{comparison_scope}\n"
         "Interaction counting: one presence per observation, receptor residue, "
         "and interaction type.\n"
         "Fingerprint similarity: Jaccard/Tanimoto coefficient.\n"
@@ -266,6 +290,8 @@ def methods_summary(project: ProjectState) -> str:
         time_axis=time_axis,
         axis_source=axis_source,
         comparison_axis=comparison_axis,
+        primary_scope=primary_scope,
+        comparison_scope=comparison_scope,
         threshold=project.state_threshold,
         iterations=project.bootstrap_iterations,
         block_size=block_size,
@@ -288,6 +314,25 @@ def _dataset_axis_summary(dataset: ProjectDataset) -> str:
         f"explicit trajectory map with {replicas} "
         f"{'replica' if replicas == 1 else 'replicas'}"
     )
+
+
+def _ligand_scope_summary(
+    dataset: ProjectDataset,
+    group_key: str | None,
+) -> str:
+    if group_key is None:
+        return "all ligand/uploaded-file groups, weighted by observation count"
+    if dataset.result is None:
+        return f"saved group {group_key}"
+    group = next(
+        (
+            item
+            for item in ligand_groups(dataset.result)
+            if item.key == group_key
+        ),
+        None,
+    )
+    return group.label if group is not None else f"unavailable group {group_key}"
 
 
 def save_project(
@@ -350,7 +395,8 @@ def load_project(source: str | os.PathLike[str]) -> ProjectState:
                 archive, "manifest.json", MAX_UNCOMPRESSED_BYTES
             )
             document = _parse_manifest(manifest_bytes)
-            if str(document.get("schema_version", "")) != PROJECT_SCHEMA_VERSION:
+            schema_version = str(document.get("schema_version", ""))
+            if schema_version not in SUPPORTED_PROJECT_SCHEMA_VERSIONS:
                 raise ValueError("unsupported project schema")
             names = {info.filename for info in infos}
             if "methods.txt" not in names:
@@ -396,7 +442,7 @@ def load_project(source: str | os.PathLike[str]) -> ProjectState:
         raise ValueError("invalid DockLens project container") from exc
 
     expected = methods_summary(project).encode("utf-8")
-    if methods_bytes != expected:
+    if schema_version == PROJECT_SCHEMA_VERSION and methods_bytes != expected:
         raise ValueError("project methods record does not match its manifest")
     return project
 
@@ -408,7 +454,8 @@ def _load_legacy_json(path: Path) -> ProjectState:
         raise ValueError("invalid project document") from exc
     if not isinstance(document, dict):
         raise ValueError("project document must be an object")
-    if str(document.get("schema_version", "")) != PROJECT_SCHEMA_VERSION:
+    schema_version = str(document.get("schema_version", ""))
+    if schema_version not in SUPPORTED_PROJECT_SCHEMA_VERSIONS:
         raise ValueError("unsupported project schema")
     return _decode_document(document)
 
@@ -432,7 +479,10 @@ def _decode_document(
     document: Mapping[str, Any],
     result_loader=None,
 ) -> ProjectState:
-    if str(document.get("schema_version", "")) != PROJECT_SCHEMA_VERSION:
+    if (
+        str(document.get("schema_version", ""))
+        not in SUPPORTED_PROJECT_SCHEMA_VERSIONS
+    ):
         raise ValueError("unsupported project schema")
     payload = document.get("project")
     if not isinstance(payload, dict):
@@ -468,6 +518,16 @@ def _decode_document(
             confidence_level=_number_value(
                 payload.get("confidence_level", 0.95),
                 "confidence_level",
+            ),
+            primary_ligand_group=(
+                None
+                if payload.get("primary_ligand_group") is None
+                else _text(payload, "primary_ligand_group")
+            ),
+            comparison_ligand_group=(
+                None
+                if payload.get("comparison_ligand_group") is None
+                else _text(payload, "comparison_ligand_group")
             ),
         )
     except ProjectIntegrityError:
@@ -509,6 +569,8 @@ def _project_to_payload(
         "bootstrap_block_size": project.bootstrap_block_size,
         "bootstrap_seed": project.bootstrap_seed,
         "confidence_level": project.confidence_level,
+        "primary_ligand_group": project.primary_ligand_group,
+        "comparison_ligand_group": project.comparison_ligand_group,
     }
 
 

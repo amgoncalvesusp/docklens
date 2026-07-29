@@ -206,6 +206,20 @@ current frequency or occupancy by channel and states the active analytical
 profile and counting unit. It collapses on compact windows without changing the
 selection.
 
+### Ligand / Uploaded-file Scope
+
+A persistent two-row context bar separates detection settings from chart
+scope. System A and System B use independent selectors. Each option shows the
+uploaded filename, detected ligand label, observation count and stable source
+identifier; generic labels such as `LIG` never merge different uploads. The
+metric text states whether charts show one source or a pooled,
+observation-weighted view. Scope changes update analytical charts and the Lens
+while the complete tables remain available.
+
+Header labels on the navy top bar always render on a transparent background.
+White title text and pale-blue context text are reserved for this dark surface
+to maintain readable contrast.
+
 ## Do's and Don'ts
 
 ### Do:
