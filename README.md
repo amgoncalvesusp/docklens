@@ -4,10 +4,11 @@
 
 *Visual Intermolecular Interaction Analytics*
 
-Standalone desktop tool (PyQt5) that detects non-covalent intermolecular
-interactions in docking poses (`.mol2`, `.pdb`, `.pdbqt`), separates receptor
-from ligand automatically, and shows the results in sortable/filterable tables
-exportable to CSV / XLSX.
+Standalone desktop tool (PyQt5) that detects and audits non-covalent
+intermolecular interactions in docking poses or saved molecular-dynamics
+frames (`.mol2`, `.pdb`, `.pdbqt`). DockLens separates receptor from ligand,
+preserves atom-level evidence and presents residue profiles, interaction
+fingerprints, comparisons and sortable/filterable tables.
 
 The legacy PLIP profile in `interaction_core.py` preserves the geometry and
 cutoffs ported from the PyMOL plugin `interactions_plugin.py`. A separate DSV
@@ -38,8 +39,8 @@ on Windows and Ubuntu runners.
 
 ## Run from source
 
-Requirements: Python 3.9+, `numpy`, `pandas`, `openpyxl`, `PyQt5` (no
-RDKit/OpenBabel).
+Requirements: Python 3.9+, `numpy`, `pandas`, `openpyxl`, `matplotlib`, `PyQt5`
+(no RDKit/OpenBabel).
 
 ```
 pip install -r requirements.txt
@@ -83,6 +84,34 @@ DockLens.exe --check-manifest <manifest.json>
 This prints a compact JSON summary and returns a nonzero exit code when the
 manifest, hashes or paired analysis are invalid.
 
+## DockLens 1.0 analytical atlas
+
+The v1 interface has four peer workspaces:
+
+- **Residues:** stacked residue/type bars and a pose/frame barcode. Every
+  channel counts at most once per observation × receptor residue × interaction
+  type, preventing multiple atom pairs from inflating prevalence or occupancy.
+- **Fingerprint:** binary pose/frame fingerprints, Jaccard/Tanimoto similarity,
+  deterministic threshold clusters and medoid observations.
+- **Compare:** System B minus System A differences with independent
+  denominators, plus an explicit docking A → MD B retention analysis
+  (`retained`, `intermittent`, `lost`, `gained`).
+- **Tables:** the complete Summary, Key Residue Coverage and atom-level Detail
+  views from earlier DockLens versions.
+
+The **DockLens Lens** keeps the selected residue synchronized with its
+frequency/occupancy evidence. Docking poses are never described as a temporal
+series; switching to molecular dynamics changes labels and enables saved-frame
+episode statistics without reinterpreting the raw interaction rows.
+
+Every analytical chart can export a publication bundle containing PNG, SVG or
+PDF output, the exact tidy CSV rows used to draw it and a JSON reproducibility
+manifest with profile, criteria, denominator and counting unit. The established
+CSV/XLSX export remains backward compatible.
+
+The **Complete** and **Discovery Studio-like** views remain visible in the
+global profile selector and are applied consistently to charts and tables.
+
 ## Using the app
 
 1. **Open file(s)** or **Open folder** (recursive scan of `.mol2/.pdb/.pdbqt`).
@@ -96,16 +125,21 @@ manifest, hashes or paired analysis are invalid.
    Discovery Studio-like is a reversible post-detection view that keeps the
    DSV interaction families and rejects salt bridges longer than 4.0 Å.
 5. **Run detection**.
-6. Sort by clicking a column; filter by interaction type, search text, or
+6. Explore **Residues**, **Fingerprint** and **Compare**. Choose whether the
+   observations represent docking poses or saved molecular-dynamics frames.
+   Load a separate System B when a differential or retention analysis is needed.
+7. Sort by clicking a column; filter by interaction type, search text, or
    "key residues only". Edit key residues any time — counts recompute without
    re-running detection.
-7. **Export CSV** or **Export XLSX**. Choose all interactions or the current
+8. Use **Export figure** from an analytical workspace to write the figure,
+   source rows and reproducibility manifest.
+9. **Export CSV** or **Export XLSX**. Choose all interactions or the current
    filtered interactions; every analyzed pose remains in Summary/Matrix, with
    zero counts when no interaction survives the filter. XLSX matrices can use
    interaction counts or binary presence values. "All interactions" always
    exports the complete result; a filtered export records the selected analysis
    view in the Parameters sheet.
-8. **Reset** clears everything to start a new analysis.
+10. **Reset** clears everything to start a new analysis.
 
 ## H-bond criteria — DockLens and the strict profile
 
@@ -195,7 +229,10 @@ CSV/XLSX writing so it cannot become an Excel formula.
 | `residue_keys.py` | Canonical residue-list parsing, validation and chain-aware matching. |
 | `export_views.py` | Pure Summary/Detail/Coverage/Residue Matrix/Parameters/QC transformations. |
 | `export.py` | Atomic CSV / XLSX writers with filtering and Okabe-Ito shading. |
-| `main_window.py` / `app.py` | PyQt5 UI + entry point. |
+| `analytics.py` | Consolidated prevalence/occupancy, fingerprints, similarity, clustering, episodes, comparison and retention. |
+| `plotting.py` / `figure_export.py` | Publication figure builders and atomic figure/data/manifest bundles. |
+| `analytics_widgets.py` / `main_window_ui.py` | Responsive analytical workspaces and desktop shell construction. |
+| `main_window.py` / `app.py` | Desktop behavior and entry point. |
 
 ## Tests
 

@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
+
+# GUI tests must not initialize the native Windows platform integration inside
+# an automated, non-interactive session. Set this before pytest-qt creates its
+# QApplication so teardown follows the same headless path as CI/self-check.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 

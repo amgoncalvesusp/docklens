@@ -20,59 +20,82 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from . import __version__, batch_runner as br
 from . import export
 from .analysis_profiles import build_analysis_view
+from .figure_export import export_figure_bundle
 from .integration_result import write_integration_result
-from .interaction_core import (
-    INTERACTION_COLORS,
-    VALID_TYPES,
-    color_hex,
-)
+from .main_window_ui import build_main_window_ui
 from .residue_keys import match_key_residues, parse_key_residues
 
 INVENTOR = "Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA)"
 LOGGER = logging.getLogger(__name__)
 
-# ---- BioLens / DockLens palette ----------------------------------------------
-BLUE = "#003B5C"  # primary: titles, primary buttons, status
-GRAY = "#60707A"  # secondary text, borders
-OFFWHITE = "#FBFBF9"  # main background
-CREAM = "#F0EFEA"  # secondary panels
-STRUCT = "#E0E4E6"  # structure base / subtle fills
+# ---- Reciprocal-space atlas palette -----------------------------------------
+BLUE = "#071A2E"
+ACCENT = "#0072B2"
+GRAY = "#5B6976"
+OFFWHITE = "#F7F9FA"
+CREAM = "#EEF2F4"
+STRUCT = "#D8E0E5"
 
 _STYLE = f"""
-* {{ font-family: 'Inter', 'Open Sans', 'Segoe UI', Arial, sans-serif; }}
-QMainWindow, QWidget {{ background: {OFFWHITE}; color: #1c2b33; }}
-QLabel#title {{ color: {BLUE}; font-size: 22px; font-weight: 700; }}
-QLabel#subtitle {{ color: {GRAY}; font-size: 12px; font-weight: 300; }}
+* {{ font-family: 'Aptos', 'Segoe UI Variable', 'Segoe UI', 'Noto Sans', sans-serif; }}
+QMainWindow, QWidget {{ background: {OFFWHITE}; color: #142330; font-size: 12px; }}
+QWidget#topBar, QWidget#navigationRail {{ background: {BLUE}; }}
+QLabel#title {{ color: white; font-size: 20px; font-weight: 700; }}
+QLabel#subtitle {{ color: #B7C9D8; font-size: 11px; font-weight: 400; }}
 QLabel#credit {{ color: {GRAY}; font-size: 11px; }}
+QLabel#workspaceTitle {{ color: #101C26; font-size: 20px; font-weight: 700; }}
+QLabel#workspaceDescription {{ color: {GRAY}; font-size: 12px; }}
+QLabel#sectionTitle {{ color: #101C26; font-size: 14px; font-weight: 700; }}
+QLabel#metricStrip {{
+    background: #EDF3F6; border: 1px solid #CAD7DE; border-radius: 3px;
+    color: #294151; padding: 7px 10px;
+}}
 QGroupBox {{
-    background: {OFFWHITE}; border: 1px solid {GRAY}; border-radius: 8px;
-    margin-top: 14px; padding: 8px; font-weight: 700; color: {BLUE};
+    background: white; border: 1px solid {STRUCT}; border-radius: 4px;
+    margin-top: 14px; padding: 9px; font-weight: 700; color: {BLUE};
 }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
 QPushButton {{
-    background: {CREAM}; border: 1px solid {GRAY}; border-radius: 6px;
-    padding: 6px 12px; color: #1c2b33;
+    background: white; border: 1px solid #AEBBC4; border-radius: 4px;
+    padding: 7px 11px; color: #172733;
 }}
 QPushButton:hover {{ background: {STRUCT}; }}
+QPushButton:disabled {{ background: #EDF0F2; color: #87939B; border-color: #D4DBDF; }}
 QPushButton#primary {{ background: {BLUE}; color: white; border: 1px solid {BLUE};
     font-weight: 700; }}
-QPushButton#primary:hover {{ background: #00527d; }}
-QLineEdit, QComboBox {{
-    background: white; border: 1px solid {GRAY}; border-radius: 6px; padding: 4px;
+QPushButton#primary:hover {{ background: #123654; }}
+QPushButton#navButton {{
+    background: transparent; border: none; border-radius: 3px; color: #DCE7EE;
+    padding: 10px 12px; text-align: left; font-weight: 600;
 }}
+QPushButton#navButton:hover {{ background: #102E49; color: white; }}
+QPushButton#navButton:checked {{ background: {ACCENT}; color: white; }}
+QLineEdit, QComboBox {{
+    background: white; border: 1px solid #AEBBC4; border-radius: 4px;
+    padding: 5px 7px; min-height: 20px;
+}}
+QPushButton:focus, QLineEdit:focus, QComboBox:focus, QListWidget:focus,
+QTableView:focus {{ border: 2px solid {ACCENT}; }}
 QTableView {{
-    background: {OFFWHITE}; alternate-background-color: {CREAM};
-    gridline-color: {STRUCT}; selection-background-color: #cfe3ef;
-    selection-color: #1c2b33;
+    background: white; alternate-background-color: #F4F7F8;
+    gridline-color: {STRUCT}; selection-background-color: #CDE8F7;
+    selection-color: #142330; border: 1px solid {STRUCT};
 }}
 QHeaderView::section {{
-    background: {BLUE}; color: white; padding: 4px; border: none; font-weight: 700;
+    background: #E9EFF2; color: #203644; padding: 6px; border: none;
+    border-right: 1px solid #D5DEE3; border-bottom: 1px solid #CBD6DC;
+    font-weight: 700;
 }}
-QTabBar::tab {{ background: {CREAM}; padding: 6px 14px; border: 1px solid {GRAY};
-    border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; }}
-QTabBar::tab:selected {{ background: {BLUE}; color: white; }}
+QTabWidget::pane {{ border: 1px solid {STRUCT}; background: white; }}
+QTabBar::tab {{ background: #E9EFF2; padding: 8px 14px;
+    border: 1px solid {STRUCT}; border-bottom: none; }}
+QTabBar::tab:selected {{ background: white; color: {BLUE}; font-weight: 700; }}
 QStatusBar {{ background: {BLUE}; color: white; }}
-QListWidget {{ background: white; border: 1px solid {GRAY}; border-radius: 6px; }}
+QListWidget {{ background: white; border: 1px solid {STRUCT}; border-radius: 4px; }}
+QWidget#analysisField {{ background: white; border: 1px solid {STRUCT};
+    border-radius: 3px; }}
+QWidget#lensPanel {{ background: white; border-left: 1px solid {STRUCT}; }}
+QScrollArea#workspaceScroll {{ background: {OFFWHITE}; border: none; }}
 """
 
 
@@ -84,100 +107,6 @@ def resource_path(name):
     return os.path.join(os.path.dirname(__file__), "assets", name)
 
 
-class DataFrameModel(QtCore.QAbstractTableModel):
-    """Table model over a pandas DataFrame with type-aware sort + colour."""
-
-    def __init__(self, df, colour_type_col=None):
-        super().__init__()
-        self._df = df.reset_index(drop=True)
-        self._colour_type_col = colour_type_col
-
-    def set_dataframe(self, df):
-        self.beginResetModel()
-        self._df = df.reset_index(drop=True)
-        self.endResetModel()
-
-    def rowCount(self, parent=QtCore.QModelIndex()):
-        return 0 if parent.isValid() else len(self._df)
-
-    def columnCount(self, parent=QtCore.QModelIndex()):
-        return 0 if parent.isValid() else self._df.shape[1]
-
-    def headerData(self, section, orientation, role=QtCore.Qt.DisplayRole):
-        if role != QtCore.Qt.DisplayRole:
-            return None
-        if orientation == QtCore.Qt.Horizontal:
-            return str(self._df.columns[section])
-        return str(section + 1)
-
-    def data(self, index, role=QtCore.Qt.DisplayRole):
-        if not index.isValid():
-            return None
-        col = self._df.columns[index.column()]
-        val = self._df.iat[index.row(), index.column()]
-        if role in (QtCore.Qt.DisplayRole, QtCore.Qt.EditRole):
-            if val is None or (isinstance(val, float) and val != val):
-                return ""
-            return str(val)
-        if role == QtCore.Qt.UserRole:
-            return val
-        if role == QtCore.Qt.BackgroundRole and self._colour_type_col == col:
-            if val in INTERACTION_COLORS:
-                return QtGui.QBrush(QtGui.QColor(color_hex(val)))
-        if role == QtCore.Qt.ForegroundRole and self._colour_type_col == col:
-            if val in INTERACTION_COLORS:
-                return QtGui.QBrush(QtGui.QColor("white"))
-        return None
-
-
-class MultiFilterProxy(QtCore.QSortFilterProxyModel):
-    """Sort numerically where possible; filter by type set / text / key-only."""
-
-    def __init__(self):
-        super().__init__()
-        self.type_filter = None
-        self.text_filter = ""
-        self.key_only = False
-        self.setSortRole(QtCore.Qt.UserRole)
-
-    def _col(self, name):
-        model = self.sourceModel()
-        for c in range(model.columnCount()):
-            if model.headerData(c, QtCore.Qt.Horizontal) == name:
-                return c
-        return -1
-
-    def lessThan(self, left, right):
-        lv = self.sourceModel().data(left, QtCore.Qt.UserRole)
-        rv = self.sourceModel().data(right, QtCore.Qt.UserRole)
-        try:
-            return float(lv) < float(rv)
-        except (TypeError, ValueError):
-            return str(lv) < str(rv)
-
-    def filterAcceptsRow(self, row, parent):
-        model = self.sourceModel()
-
-        def cell(name):
-            c = self._col(name)
-            return "" if c < 0 else (model.data(model.index(row, c)) or "")
-
-        if self.type_filter is not None and self._col("interaction_type") >= 0:
-            if cell("interaction_type") not in self.type_filter:
-                return False
-        if self.key_only and self._col("is_key_residue") >= 0:
-            if cell("is_key_residue") not in ("True", "true", "1"):
-                return False
-        if self.text_filter:
-            needle = self.text_filter.lower()
-            hay = " ".join(
-                cell(n) for n in ("receptor_residue", "source_file", "ligand_id")
-            ).lower()
-            if needle not in hay:
-                return False
-        return True
-
-
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -186,166 +115,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1200, 800)
         self._files = []
         self._result = None
+        self._comparison_result = None
         self._launch_manifest = None
         self._syncing = False
         self._key_invalid_tokens = ()
+        self.setStyleSheet(_STYLE)
         self._build_ui()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        central = QtWidgets.QWidget()
-        self.setCentralWidget(central)
-        root = QtWidgets.QVBoxLayout(central)
+        build_main_window_ui(self, resource_path)
 
-        root.addLayout(self._header())
-        root.addLayout(self._toolbar())
-        root.addWidget(self._filters_card())
-        root.addWidget(self._type_card())
-        root.addWidget(self._tables(), 1)
+    def _workspace_changed(self, index):
+        if 0 <= index < len(self.workspace_buttons):
+            self.workspace_buttons[index].setChecked(True)
 
-        self.status = self.statusBar()
-        self.status.showMessage("Open a file, list or folder, then Run detection.")
-        self._init_models()
-
-    def _header(self):
-        bar = QtWidgets.QHBoxLayout()
-        logo = QtWidgets.QLabel()
-        pix = QtGui.QPixmap(resource_path("docklens_icon.png"))
-        if not pix.isNull():
-            logo.setPixmap(pix.scaledToHeight(48, QtCore.Qt.SmoothTransformation))
-        bar.addWidget(logo)
-        titles = QtWidgets.QVBoxLayout()
-        t = QtWidgets.QLabel("DockLens")
-        t.setObjectName("title")
-        s = QtWidgets.QLabel("Visual Intermolecular Interaction Analytics")
-        s.setObjectName("subtitle")
-        titles.addWidget(t)
-        titles.addWidget(s)
-        bar.addLayout(titles)
-        bar.addStretch(1)
-        about = QtWidgets.QPushButton("About")
-        about.clicked.connect(self._about)
-        bar.addWidget(about)
-        return bar
-
-    def _toolbar(self):
-        top = QtWidgets.QHBoxLayout()
-        b_files = QtWidgets.QPushButton("Open file(s)...")
-        b_folder = QtWidgets.QPushButton("Open folder...")
-        b_run = QtWidgets.QPushButton("Run detection")
-        b_run.setObjectName("primary")
-        b_reset = QtWidgets.QPushButton("Reset")
-        b_files.clicked.connect(self._open_files)
-        b_folder.clicked.connect(self._open_folder)
-        b_run.clicked.connect(self._run)
-        b_reset.clicked.connect(self._reset)
-        for b in (b_files, b_folder, b_run, b_reset):
-            top.addWidget(b)
-        top.addSpacing(16)
-        top.addWidget(QtWidgets.QLabel("H-bond criteria:"))
-        self.preset_combo = QtWidgets.QComboBox()
-        self.preset_combo.addItem("PLIP (default)", "plip")
-        self.preset_combo.addItem("DS-calibrated beta (explicit-H geometry)", "dsv")
-        top.addWidget(self.preset_combo)
-        top.addSpacing(12)
-        top.addWidget(QtWidgets.QLabel("Analysis view:"))
-        self.analysis_combo = QtWidgets.QComboBox()
-        self.analysis_combo.addItem("Complete", "complete")
-        self.analysis_combo.addItem("Discovery Studio-like", "ds_like")
-        self.analysis_combo.currentIndexChanged.connect(self._refresh_tables)
-        top.addWidget(self.analysis_combo)
-        top.addStretch(1)
-        b_csv = QtWidgets.QPushButton("Export CSV")
-        b_xlsx = QtWidgets.QPushButton("Export XLSX")
-        b_csv.clicked.connect(self._export_csv)
-        b_xlsx.clicked.connect(self._export_xlsx)
-        top.addWidget(b_csv)
-        top.addWidget(b_xlsx)
-        return top
-
-    def _filters_card(self):
-        card = QtWidgets.QGroupBox("Filters & key residues")
-        lay = QtWidgets.QGridLayout(card)
-
-        lay.addWidget(QtWidgets.QLabel("Key residues:"), 0, 0)
-        self.key_edit = QtWidgets.QLineEdit()
-        self.key_edit.setPlaceholderText(
-            "e.g. SER70; LYS73; GLU166 (space, comma, semicolon or line break)"
+    def _update_lens(self, residue):
+        self.lens_residue.setText(residue or "No selection")
+        self.lens_evidence.setText(
+            self.analytics_workspace.evidence_text(residue)
         )
-        self.key_edit.editingFinished.connect(self._key_text_changed)
-        lay.addWidget(self.key_edit, 0, 1, 1, 2)
-
-        lay.addWidget(QtWidgets.QLabel("Search:"), 0, 3)
-        self.search_edit = QtWidgets.QLineEdit()
-        self.search_edit.setPlaceholderText("residue / file / ligand")
-        self.search_edit.textChanged.connect(self._apply_filters)
-        lay.addWidget(self.search_edit, 0, 4)
-        self.key_only_cb = QtWidgets.QCheckBox("Key residues only")
-        self.key_only_cb.stateChanged.connect(self._apply_filters)
-        lay.addWidget(self.key_only_cb, 0, 5)
-
-        lay.addWidget(
-            QtWidgets.QLabel("Pick key residues from detected protein:"), 1, 0, 1, 2
-        )
-        self.res_filter = QtWidgets.QLineEdit()
-        self.res_filter.setPlaceholderText("filter list...")
-        self.res_filter.textChanged.connect(self._filter_residue_list)
-        lay.addWidget(self.res_filter, 1, 3, 1, 3)
-
-        self.res_list = QtWidgets.QListWidget()
-        self.res_list.setMaximumHeight(140)
-        self.res_list.itemChanged.connect(self._residue_checks_changed)
-        lay.addWidget(self.res_list, 2, 0, 1, 6)
-        self.key_status = QtWidgets.QLabel("No key residues configured.")
-        self.key_status.setWordWrap(True)
-        self.key_status.setObjectName("subtitle")
-        lay.addWidget(self.key_status, 3, 0, 1, 6)
-        return card
-
-    def _type_card(self):
-        card = QtWidgets.QGroupBox("Interaction types (filter Detail table)")
-        grid = QtWidgets.QGridLayout(card)
-        self.type_boxes = {}
-        for i, t in enumerate(VALID_TYPES):
-            cb = QtWidgets.QCheckBox(t)
-            cb.setChecked(True)
-            cb.stateChanged.connect(self._apply_filters)
-            self.type_boxes[t] = cb
-            grid.addWidget(cb, i // 6, i % 6)
-        return card
-
-    def _tables(self):
-        self.tabs = QtWidgets.QTabWidget()
-        self.summary_view = QtWidgets.QTableView()
-        self.coverage_view = QtWidgets.QTableView()
-        self.detail_view = QtWidgets.QTableView()
-        for v in (self.summary_view, self.coverage_view, self.detail_view):
-            v.setSortingEnabled(True)
-            v.setAlternatingRowColors(True)
-            v.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-            v.horizontalHeader().setStretchLastSection(True)
-        self.tabs.addTab(self.summary_view, "Summary")
-        self.tabs.addTab(self.coverage_view, "Key Residue Coverage")
-        self.tabs.addTab(self.detail_view, "Detail")
-        return self.tabs
-
-    def _init_models(self):
-        import pandas as pd
-
-        self.summary_model = DataFrameModel(pd.DataFrame())
-        self.coverage_model = DataFrameModel(pd.DataFrame())
-        self.detail_model = DataFrameModel(
-            pd.DataFrame(), colour_type_col="interaction_type"
-        )
-        self.summary_proxy = MultiFilterProxy()
-        self.summary_proxy.setSourceModel(self.summary_model)
-        self.coverage_proxy = MultiFilterProxy()
-        self.coverage_proxy.setSourceModel(self.coverage_model)
-        self.detail_proxy = MultiFilterProxy()
-        self.detail_proxy.setSourceModel(self.detail_model)
-        self.summary_view.setModel(self.summary_proxy)
-        self.coverage_view.setModel(self.coverage_proxy)
-        self.detail_view.setModel(self.detail_proxy)
 
     # -------------------------------------------------------------- actions
     def _open_files(self):
@@ -373,6 +162,93 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _analysis_profile(self):
         return self.analysis_combo.currentData()
+
+    def _mode_changed(self):
+        mode = self.mode_combo.currentData() or "docking"
+        self.analytics_workspace.set_mode(mode)
+        self._update_lens(self.analytics_workspace.selected_residue)
+
+    def _load_comparison(self):
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Select System B structures",
+            "",
+            "Structures (*.mol2 *.pdb *.pdbqt);;All files (*)",
+        )
+        if not files:
+            return
+        try:
+            comparison = br.run(
+                files,
+                key_residues=self.key_edit.text(),
+                hbond_preset=self._hbond_preset(),
+            )
+        except Exception:  # noqa: BLE001 - contain parser failures at GUI boundary
+            LOGGER.exception("Comparison dataset analysis failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "System B could not be analyzed",
+                "Verify the selected structures and analysis criteria, then "
+                "try again.",
+            )
+            return
+        self._comparison_result = comparison
+        self._refresh_tables()
+        self.workspace_stack.setCurrentIndex(2)
+        self.status.showMessage(
+            "System B loaded: %d observation(s), %d interaction row(s)."
+            % (len(comparison.summaries), len(comparison.details))
+        )
+
+    def _export_figure(self):
+        if not self._require_result():
+            return
+        artifact = self.analytics_workspace.current_artifact(
+            self.workspace_stack.currentIndex()
+        )
+        if artifact is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Choose an analytical workspace",
+                "Open Residues, Fingerprint or Compare before exporting a figure.",
+            )
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export publication figure bundle",
+            artifact.kind,
+            "PNG image (*.png);;SVG vector (*.svg);;PDF vector (*.pdf)",
+        )
+        if not path:
+            return
+        suffix = os.path.splitext(path)[1].lower().lstrip(".")
+        file_format = suffix if suffix in {"png", "svg", "pdf"} else "png"
+        try:
+            outputs = export_figure_bundle(
+                artifact,
+                path,
+                formats=(file_format,),
+                dpi=300,
+                extra_metadata={
+                    "analysis_profile": self._analysis_profile(),
+                    "hbond_preset": self._hbond_preset(),
+                },
+            )
+        except Exception:  # noqa: BLE001 - contain library errors at UI boundary
+            LOGGER.exception("Publication figure export failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Figure export failed",
+                "DockLens could not write the figure bundle. Verify the "
+                "destination and available disk space, then try again.",
+            )
+            return
+        QtWidgets.QMessageBox.information(
+            self,
+            "Figure bundle exported",
+            "Figure, source rows and reproducibility manifest were written:\n"
+            + "\n".join(outputs),
+        )
 
     def _run(self):
         if not self._files:
@@ -406,9 +282,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 hbond_preset=self._hbond_preset(),
             )
         self._result = result
+        self.dataset_context.setText(
+            f"{len(result.summaries)} observation(s) · "
+            f"{len(result.details)} raw interaction row(s)"
+        )
         self._write_dockinghub_result(show_warning=True)
         self._populate_residue_list()
         self._refresh_tables()
+        self.dataset_context.setText(
+            f"DockingHub · {len(self._result.summaries)} pose(s)"
+        )
         errors = sum(record.status == "error" for record in result.input_qc)
         self.status.showMessage(
             "%d ligand/pose row(s), %d interaction(s), %d error(s) [%s]."
@@ -494,6 +377,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.summary_model.set_dataframe(export.summary_dataframe(view))
         self.coverage_model.set_dataframe(export.key_residue_coverage_dataframe(view))
         self.detail_model.set_dataframe(export.detail_dataframe(view))
+        self.analytics_workspace.set_result(view)
+        if self._comparison_result is not None:
+            comparison_view = build_analysis_view(
+                self._comparison_result, self._analysis_profile()
+            )
+            self.analytics_workspace.set_comparison(comparison_view)
+        else:
+            self.analytics_workspace.set_comparison(None)
+        self.lens_profile.setText(
+            "Profile: %s\nCounting unit: one presence per observation, "
+            "residue and interaction type"
+            % self.analysis_combo.currentText()
+        )
+        self._update_lens(self.analytics_workspace.selected_residue)
         self._apply_filters()
         if len(view.details) < 500:
             self.summary_view.resizeColumnsToContents()
@@ -623,6 +520,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Clear everything for a fresh analysis."""
         self._files = []
         self._result = None
+        self._comparison_result = None
         self._launch_manifest = None
         self._syncing = True
         self._key_invalid_tokens = ()
@@ -635,12 +533,17 @@ class MainWindow(QtWidgets.QMainWindow):
             cb.setChecked(True)
         self.preset_combo.setCurrentIndex(0)
         self.analysis_combo.setCurrentIndex(0)
+        self.mode_combo.setCurrentIndex(0)
         self._syncing = False
         import pandas as pd
 
         self.summary_model.set_dataframe(pd.DataFrame())
         self.coverage_model.set_dataframe(pd.DataFrame())
         self.detail_model.set_dataframe(pd.DataFrame())
+        self.analytics_workspace.set_comparison(None)
+        self.analytics_workspace.set_result(None)
+        self.dataset_context.setText("No dataset loaded")
+        self._update_lens("")
         self._update_key_status()
         self.status.showMessage(
             "Reset. Open a file, list or folder, then Run detection."
@@ -731,6 +634,20 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return False
         return True
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "lens_panel"):
+            self.lens_panel.setVisible(self.width() >= 1080)
+        if hasattr(self, "nav_rail"):
+            compact = self.width() < 820
+            self.nav_rail.setMinimumWidth(104 if compact else 132)
+            self.nav_rail.setMaximumWidth(122 if compact else 172)
+
+    def closeEvent(self, event):
+        if hasattr(self, "analytics_workspace"):
+            self.analytics_workspace.dispose()
+        super().closeEvent(event)
 
     def _about(self):
         dlg = QtWidgets.QDialog(self)

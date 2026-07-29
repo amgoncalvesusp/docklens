@@ -2,7 +2,7 @@ name: Build standalone executables
 
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -71,14 +71,22 @@ jobs:
             libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 \
             libxcb-xinerama0 libxcb-xkb1
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt pyinstaller==6.12.0
+        run: python -m pip install -r requirements.txt pyinstaller==6.21.0
+      - name: Validate analytical Qt lifecycle on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pip install pytest==9.0.3 pytest-qt==4.4.0
+          python -m pytest -q tests/test_analytics_gui.py
       - name: Build executable
         run: >
           pyinstaller --noconfirm --onefile --windowed --name DockLens
           --icon "${{ matrix.icon }}"
           --add-data "docklens/assets${{ matrix.sep }}docklens/assets"
           --exclude-module scipy --exclude-module rdkit
-          --exclude-module matplotlib --exclude-module tkinter
+          --exclude-module tkinter
           --exclude-module IPython --exclude-module pytest
           --exclude-module pkg_resources --exclude-module setuptools
           run_docklens.py
