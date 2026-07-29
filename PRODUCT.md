@@ -36,6 +36,8 @@ interaction persistence in one reproducible desktop workflow.
   details and matrices.
 - Researchers compare ligands, poses, time ranges, trajectories and key
   residues.
+- Docking fingerprints can form pose families; ordered MD fingerprints can
+  form interaction states with descriptive transitions and representatives.
 - Tables and figures are exported for audit, collaboration and publication.
 - The companion PyMOL plug-in remains the molecular-viewing surface.
 
@@ -49,6 +51,15 @@ interaction persistence in one reproducible desktop workflow.
 - Raw atom-pair events remain available even when charts use consolidated
   residue/type/pose-or-frame counting units.
 - Existing CSV/XLSX results and v0.6.0 behavior must remain reproducible.
+- State clustering must disclose method, threshold, training sample and
+  outliers.
+- MD intervals must preserve temporal dependence through block resampling,
+  disclose every parameter and never be applied to docking poses.
+- MD analyses must visibly disclose the single-series fallback. An explicit
+  trajectory map defines observation order, replica boundaries, frame gaps and
+  time values and must survive project save/open.
+- Saved projects retain the unprofiled result so Complete and Discovery
+  Studio-like remain reversible without redetection.
 - Version 1.0.0 is developed on an isolated branch and does not replace the
   current stable release until explicitly approved.
 
@@ -75,6 +86,8 @@ interaction persistence in one reproducible desktop workflow.
 3. Use interaction fingerprints to reveal patterns, not to hide assumptions.
 4. Keep dense workflows scannable and selections synchronized.
 5. Export the data behind every publication figure.
+6. Express uncertainty and temporal assumptions instead of implying that
+   saved frames are independent.
 
 ## Accessibility & Inclusion
 

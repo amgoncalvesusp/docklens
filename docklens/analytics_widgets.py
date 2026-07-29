@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pandas as pd
 from PyQt5 import QtCore, QtWidgets
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
+from .analysis_tasks import AnalysisTaskRunner
 from .analytics import (
     AnalysisContext,
     episode_statistics,
@@ -12,6 +14,22 @@ from .analytics import (
     fingerprint_matrix,
     fingerprint_similarity,
     residue_type_prevalence,
+)
+from .dynamic_plotting import (
+    build_difference_uncertainty_chart,
+    build_state_population_chart,
+    build_state_timeline_chart,
+    build_transition_chart,
+    build_uncertainty_chart,
+)
+from .dynamic_states import (
+    interaction_state_analysis,
+    state_summary_frame,
+)
+from .dynamic_ui import build_dynamic_analysis
+from .observation_series import (
+    ObservationSeries,
+    observation_series_from_dataframe,
 )
 from .plotting import (
     ChartArtifact,
@@ -22,10 +40,13 @@ from .plotting import (
     build_similarity_chart,
 )
 from .results import RunResult, make_result
+from .uncertainty import (
+    block_bootstrap_difference,
+    block_bootstrap_occupancy,
+)
 
 
 _MAX_SIMILARITY_OBSERVATIONS = 300
-
 
 class ChartPanel(QtWidgets.QWidget):
     """Replaceable Matplotlib canvas with a safe empty state."""
@@ -62,7 +83,6 @@ class ChartPanel(QtWidgets.QWidget):
         self._dispose_canvas()
         super().closeEvent(event)
 
-
 def _heading(title, description):
     widget = QtWidgets.QWidget()
     layout = QtWidgets.QVBoxLayout(widget)
@@ -75,7 +95,6 @@ def _heading(title, description):
     layout.addWidget(title_label)
     layout.addWidget(description_label)
     return widget
-
 
 def _scrollable(content):
     area = QtWidgets.QScrollArea()
@@ -92,17 +111,27 @@ class AnalyticsWorkspace(QtCore.QObject):
     """Own the three analytical pages and their synchronized selection."""
 
     residueSelected = QtCore.pyqtSignal(str)
+    representativeSelected = QtCore.pyqtSignal(str)
     artifactChanged = QtCore.pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._result: RunResult = make_result()
+        self._tasks = AnalysisTaskRunner(self)
         self._comparison: RunResult | None = None
+        self._series: ObservationSeries | None = None
+        self._comparison_series: ObservationSeries | None = None
         self._mode = "docking"
+        self.bootstrap_seed = 2026
+        self.confidence_level = 0.95
         self._selected_residue = ""
         self._fingerprint_matrix = fingerprint_matrix(self._result)
         self._fingerprint_similarity = fingerprint_similarity(
             self._fingerprint_matrix
+        )
+        self.state_analysis = interaction_state_analysis(
+            self._fingerprint_matrix,
+            AnalysisContext(mode=self._mode),
         )
         self.residue_page = self._build_residue_page()
         self.fingerprint_page = self._build_fingerprint_page()
@@ -162,7 +191,21 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.fingerprint_status = QtWidgets.QLabel()
         self.fingerprint_status.setObjectName("metricStrip")
         self.fingerprint_status.setWordWrap(True)
-        layout.addWidget(self.fingerprint_status)
+        export_row = QtWidgets.QHBoxLayout()
+        export_row.addWidget(self.fingerprint_status, 1)
+        export_row.addWidget(QtWidgets.QLabel("Export view:"))
+        self.fingerprint_export_combo = QtWidgets.QComboBox()
+        for label, value in (
+            ("Interaction fingerprint", "fingerprint"),
+            ("Similarity matrix", "similarity"),
+            ("State populations", "population"),
+            ("State timeline / pose order", "timeline"),
+            ("State transitions", "transitions"),
+            ("Confidence intervals", "confidence"),
+        ):
+            self.fingerprint_export_combo.addItem(label, value)
+        export_row.addWidget(self.fingerprint_export_combo)
+        layout.addLayout(export_row)
         self.fingerprint_panel = ChartPanel(minimum_height=390)
         self.fingerprint_panel.setObjectName("analysisField")
         layout.addWidget(self.fingerprint_panel)
@@ -190,7 +233,11 @@ class AnalyticsWorkspace(QtCore.QObject):
         lower.addWidget(cluster_box)
         lower.setSizes((520, 360))
         layout.addWidget(lower)
+        layout.addWidget(self._build_dynamic_analysis())
         return _scrollable(content)
+
+    def _build_dynamic_analysis(self):
+        return build_dynamic_analysis(self, ChartPanel)
 
     def _build_compare_page(self):
         content = QtWidgets.QWidget()
@@ -239,6 +286,20 @@ class AnalyticsWorkspace(QtCore.QObject):
             self._comparison_roles_changed
         )
         mode_row.addWidget(self.system_b_role)
+        self.load_comparison_trajectory_map_button = QtWidgets.QPushButton(
+            "Load B trajectory map"
+        )
+        self.load_comparison_trajectory_map_button.clicked.connect(
+            lambda: self._load_trajectory_map(comparison=True)
+        )
+        mode_row.addWidget(self.load_comparison_trajectory_map_button)
+        self.compare_confidence_button = QtWidgets.QPushButton(
+            "Compute Δ confidence intervals"
+        )
+        self.compare_confidence_button.clicked.connect(
+            self._compute_comparison_uncertainty
+        )
+        mode_row.addWidget(self.compare_confidence_button)
         layout.addLayout(mode_row)
         self.compare_panel = ChartPanel(minimum_height=420)
         self.compare_panel.setObjectName("analysisField")
@@ -246,6 +307,10 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.retention_panel = ChartPanel(minimum_height=330)
         self.retention_panel.setObjectName("analysisField")
         layout.addWidget(self.retention_panel)
+        self.compare_uncertainty_panel = ChartPanel(minimum_height=380)
+        self.compare_uncertainty_panel.setObjectName("analysisField")
+        self.compare_uncertainty_panel.setVisible(False)
+        layout.addWidget(self.compare_uncertainty_panel)
         return _scrollable(content)
 
     @property
@@ -258,7 +323,91 @@ class AnalyticsWorkspace(QtCore.QObject):
 
     def set_comparison(self, result: RunResult | None):
         self._comparison = result
+        if result is None:
+            self._comparison_series = None
         self.refresh_compare()
+
+    def set_observation_series(
+        self,
+        series: ObservationSeries | None,
+        *,
+        comparison: bool = False,
+        refresh: bool = True,
+        result: RunResult | None = None,
+    ):
+        if series is not None and series.mode != "md":
+            raise ValueError("trajectory maps must use MD observation series")
+        if series is not None:
+            target_result = (
+                result
+                if result is not None
+                else (self._comparison if comparison else self._result)
+            )
+            matrix = fingerprint_matrix(target_result)
+            if set(series.observation_ids) != set(matrix.index):
+                raise ValueError(
+                    "trajectory map must match the analyzed observation IDs"
+                )
+        if comparison:
+            self._comparison_series = series
+        else:
+            self._series = series
+        if refresh:
+            if comparison:
+                self.refresh_compare()
+            else:
+                self._refresh_states()
+
+    def clear_observation_series(self):
+        self._series = None
+        self._comparison_series = None
+
+    def _load_trajectory_map(self, *, comparison: bool):
+        dataset_mode = (
+            self.system_b_role.currentData() if comparison else self._mode
+        )
+        if dataset_mode != "md":
+            QtWidgets.QMessageBox.information(
+                None,
+                "Trajectory map is for MD",
+                "Change this dataset role to MD frames before loading a map.",
+            )
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            None,
+            "Load trajectory map",
+            "",
+            "CSV trajectory map (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            source = QtCore.QFileInfo(path)
+            if source.size() > 32 * 1024 * 1024:
+                raise ValueError("trajectory map exceeds 32 MB")
+            matrix = fingerprint_matrix(
+                self._comparison if comparison else self._result
+            )
+            frame = pd.read_csv(path)
+            if len(frame) > 2_000_000:
+                raise ValueError("trajectory map has too many rows")
+            series = observation_series_from_dataframe(
+                frame,
+                expected_ids=matrix.index,
+                default_time_step_ns=self.time_step_spin.value(),
+            )
+            self.set_observation_series(
+                series,
+                comparison=comparison,
+            )
+        except (OSError, UnicodeError, ValueError, pd.errors.ParserError):
+            QtWidgets.QMessageBox.warning(
+                None,
+                "Trajectory map could not be loaded",
+                "Use a CSV containing exactly one row per analyzed "
+                "observation and the columns observation_id, replica_id, "
+                "frame_index and optional time_ns.",
+            )
 
     def set_mode(self, mode: str):
         AnalysisContext(mode=mode)
@@ -267,6 +416,8 @@ class AnalyticsWorkspace(QtCore.QObject):
             selector.blockSignals(True)
             selector.setCurrentIndex(selector.findData(mode))
             selector.blockSignals(False)
+        self.time_step_spin.setEnabled(mode == "md")
+        self.load_trajectory_map_button.setEnabled(mode == "md")
         self.refresh()
 
     def select_residue(self, residue: str):
@@ -277,6 +428,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.residueSelected.emit(residue)
 
     def refresh(self):
+        self._tasks.invalidate()
         prevalence = residue_type_prevalence(self._result)
         self._fingerprint_matrix = fingerprint_matrix(self._result)
         similarity_matrix = self._fingerprint_matrix
@@ -330,6 +482,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         )
         self._refresh_residue_selector()
         self._refresh_clusters()
+        self._refresh_states()
         self.refresh_compare()
         self.artifactChanged.emit(residue_artifact)
 
@@ -382,7 +535,190 @@ class AnalyticsWorkspace(QtCore.QObject):
                     row, column, QtWidgets.QTableWidgetItem(str(value))
                 )
 
+    def _refresh_states(self):
+        if not hasattr(self, "state_threshold_spin"):
+            return
+        context = AnalysisContext(
+            mode=self._mode,
+            time_step_ns=self.time_step_spin.value(),
+        )
+        self.state_analysis = interaction_state_analysis(
+            self._fingerprint_matrix,
+            context,
+            threshold=self.state_threshold_spin.value(),
+            max_training_observations=_MAX_SIMILARITY_OBSERVATIONS,
+            series=self._series,
+        )
+        self.state_population_panel.set_artifact(
+            build_state_population_chart(self.state_analysis)
+        )
+        self.state_timeline_panel.set_artifact(
+            build_state_timeline_chart(self.state_analysis)
+        )
+        temporal = self._mode == "md"
+        self.dynamic_group_box.setTitle(
+            "Dynamic interaction states" if temporal else "Pose families"
+        )
+        self.dynamic_tabs.setTabText(1, "Timeline" if temporal else "Pose order")
+        header = self.state_table.horizontalHeaderItem(5)
+        if header is not None:
+            header.setText("Mean dwell" if temporal else "Temporal metric")
+        self.dynamic_tabs.setTabEnabled(2, temporal)
+        self.dynamic_tabs.setTabEnabled(3, temporal)
+        self.compute_uncertainty_button.setEnabled(
+            temporal and len(self._fingerprint_matrix.index) > 0
+        )
+        for data in ("transitions", "confidence"):
+            item = self.fingerprint_export_combo.model().item(
+                self.fingerprint_export_combo.findData(data)
+            )
+            if item is not None:
+                item.setEnabled(temporal)
+        if (
+            not temporal
+            and self.fingerprint_export_combo.currentData()
+            in {"transitions", "confidence"}
+        ):
+            self.fingerprint_export_combo.setCurrentIndex(
+                self.fingerprint_export_combo.findData("fingerprint")
+            )
+        if temporal:
+            self.transition_panel.set_artifact(
+                build_transition_chart(self.state_analysis)
+            )
+        self.uncertainty_panel.set_artifact(
+            build_uncertainty_chart(pd.DataFrame())
+        )
+        self._refresh_state_table()
+        term = (
+            "pose families"
+            if self._mode == "docking"
+            else "interaction states"
+        )
+        sampling = (
+            f"trained on {self.state_analysis.training_observations} evenly "
+            f"sampled observations; {len(self.state_analysis.outlier_observations)} "
+            "outliers"
+            if self.state_analysis.sampled
+            else "all observations used"
+        )
+        temporal_note = (
+            "Transitions are descriptive and preserve frame gaps and replica "
+            "boundaries."
+            if temporal
+            else "Docking groups are pose families; no temporal interpretation."
+        )
+        if temporal:
+            active_series = self.state_analysis.series
+            replicas = len(
+                {point.replica_id for point in active_series.points}
+            )
+            gaps = len(active_series.points) - replicas - len(
+                active_series.transition_pairs()
+            )
+            map_note = (
+                f"Explicit trajectory map: {replicas} "
+                f"{'replica' if replicas == 1 else 'replicas'}, "
+                f"{max(gaps, 0)} frame gap(s)."
+                if self._series is not None
+                else "Implicit single contiguous series; load a trajectory "
+                "map to declare replicas or gaps."
+            )
+        else:
+            map_note = ""
+        self.state_status.setText(
+            f"{len(self.state_analysis.states)} {term} · complete-link "
+            f"threshold {self.state_analysis.threshold:.2f} · {sampling}. "
+            + temporal_note
+            + (" " + map_note if map_note else "")
+        )
+
+    def _refresh_state_table(self):
+        frame = state_summary_frame(self.state_analysis)
+        self.state_table.setRowCount(len(frame))
+        for row_index, row in enumerate(frame.itertuples(index=False)):
+            features = "; ".join(
+                f"{residue} · {kind}"
+                for residue, kind in row.characteristic_features
+            )
+            mean_dwell = (
+                "not applicable to docking"
+                if row.mean_dwell_observations is None
+                else f"{row.mean_dwell_observations:.2f} frames"
+            )
+            values = (
+                row.state_id,
+                row.population_count,
+                f"{row.population_pct:.1f}",
+                row.representative,
+                f"{row.mean_similarity:.3f}",
+                mean_dwell,
+                features or "No consensus contact",
+            )
+            for column, value in enumerate(values):
+                self.state_table.setItem(
+                    row_index,
+                    column,
+                    QtWidgets.QTableWidgetItem(str(value)),
+                )
+        self.open_representative_button.setEnabled(False)
+
+    def _state_selection_changed(self):
+        self.open_representative_button.setEnabled(
+            bool(self.state_table.selectedItems())
+        )
+
+    def _emit_representative(self):
+        rows = self.state_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        item = self.state_table.item(rows[0].row(), 3)
+        if item is not None and item.text():
+            self.representativeSelected.emit(item.text())
+
+    def _compute_uncertainty(self):
+        if self._mode != "md" or self._fingerprint_matrix.empty:
+            return
+        self.compute_uncertainty_button.setEnabled(False)
+        self.compute_uncertainty_button.setText("Computing…")
+        self._tasks.start(
+            block_bootstrap_occupancy,
+            self._fingerprint_matrix.copy(deep=True),
+            AnalysisContext(
+                mode="md",
+                time_step_ns=self.time_step_spin.value(),
+            ),
+            iterations=int(self.bootstrap_iterations_combo.currentData()),
+            block_size=(
+                self.bootstrap_block_size_spin.value() or None
+            ),
+            seed=self.bootstrap_seed,
+            confidence_level=self.confidence_level,
+            series=self._series,
+            on_success=self._uncertainty_ready,
+            on_error=self._uncertainty_failed,
+            on_settled=self._uncertainty_settled,
+        )
+
+    def _uncertainty_ready(self, intervals):
+        self.uncertainty_panel.set_artifact(
+            build_uncertainty_chart(intervals)
+        )
+        self.dynamic_tabs.setCurrentIndex(3)
+
+    def _uncertainty_failed(self, _error_name):
+        self.state_status.setText(
+            "Confidence intervals could not be computed for this selection."
+        )
+
+    def _uncertainty_settled(self):
+        self.compute_uncertainty_button.setText(
+            "Compute confidence intervals"
+        )
+        self.compute_uncertainty_button.setEnabled(self._mode == "md")
+
     def refresh_compare(self):
+        self._tasks.invalidate()
         comparison = self._comparison or make_result()
         compare_artifact = build_comparison_chart(
             self._result, comparison, mode=self._mode
@@ -397,6 +733,16 @@ class AnalyticsWorkspace(QtCore.QObject):
             and self.system_a_role.currentData() == "docking"
             and self.system_b_role.currentData() == "md"
         )
+        self.compare_confidence_button.setEnabled(
+            self._comparison is not None
+            and self._mode == "md"
+            and self.compare_analysis_combo.currentData() == "difference"
+        )
+        self.load_comparison_trajectory_map_button.setEnabled(
+            self._comparison is not None
+            and self.system_b_role.currentData() == "md"
+        )
+        self.compare_uncertainty_panel.setVisible(False)
         retention_item = self.compare_analysis_combo.model().item(1)
         if retention_item is not None:
             retention_item.setEnabled(roles_allow_retention)
@@ -437,12 +783,86 @@ class AnalyticsWorkspace(QtCore.QObject):
     def _comparison_roles_changed(self):
         self.refresh_compare()
 
+    def _compute_comparison_uncertainty(self):
+        if self._comparison is None or self._mode != "md":
+            return
+        self.compare_confidence_button.setEnabled(False)
+        self.compare_confidence_button.setText("Computing Δ…")
+        self._tasks.start(
+            block_bootstrap_difference,
+            fingerprint_matrix(self._result).copy(deep=True),
+            fingerprint_matrix(self._comparison).copy(deep=True),
+            AnalysisContext(
+                mode="md",
+                time_step_ns=self.time_step_spin.value(),
+            ),
+            iterations=int(self.bootstrap_iterations_combo.currentData()),
+            block_size_a=(
+                self.bootstrap_block_size_spin.value() or None
+            ),
+            block_size_b=(
+                self.bootstrap_block_size_spin.value() or None
+            ),
+            seed=self.bootstrap_seed,
+            confidence_level=self.confidence_level,
+            series_a=self._series,
+            series_b=self._comparison_series,
+            on_success=self._comparison_uncertainty_ready,
+            on_error=self._comparison_uncertainty_failed,
+            on_settled=self._comparison_uncertainty_settled,
+        )
+
+    def _comparison_uncertainty_ready(self, intervals):
+        if (
+            self._comparison is None
+            or self._mode != "md"
+            or self.compare_analysis_combo.currentData() != "difference"
+        ):
+            return
+        self.compare_uncertainty_panel.set_artifact(
+            build_difference_uncertainty_chart(intervals)
+        )
+        self.compare_uncertainty_panel.setVisible(True)
+
+    def _comparison_uncertainty_failed(self, _error_name):
+        self.compare_status.setText(
+            "Comparison confidence intervals could not be computed."
+        )
+
+    def _comparison_uncertainty_settled(self):
+        self.compare_confidence_button.setText(
+            "Compute Δ confidence intervals"
+        )
+        self.compare_confidence_button.setEnabled(
+            self._comparison is not None
+            and self._mode == "md"
+            and self.compare_analysis_combo.currentData() == "difference"
+        )
+
     def current_artifact(self, workspace_index):
         if workspace_index == 0:
             return self.residue_panel.artifact
         if workspace_index == 1:
-            return self.fingerprint_panel.artifact
+            panels = {
+                "fingerprint": self.fingerprint_panel,
+                "similarity": self.similarity_panel,
+                "population": self.state_population_panel,
+                "timeline": self.state_timeline_panel,
+                "transitions": self.transition_panel,
+                "confidence": self.uncertainty_panel,
+            }
+            panel = panels.get(
+                self.fingerprint_export_combo.currentData(),
+                self.fingerprint_panel,
+            )
+            return panel.artifact or self.fingerprint_panel.artifact
         if workspace_index == 2:
+            if (
+                self.compare_uncertainty_panel.isVisible()
+                and self._mode == "md"
+                and self.compare_analysis_combo.currentData() == "difference"
+            ):
+                return self.compare_uncertainty_panel.artifact
             if self.compare_analysis_combo.currentData() == "retention":
                 return self.retention_panel.artifact
             return self.compare_panel.artifact
@@ -450,6 +870,7 @@ class AnalyticsWorkspace(QtCore.QObject):
 
     def dispose(self):
         """Release every native Matplotlib canvas before Qt application exit."""
+        self._tasks.wait_for_done()
         for panel in (
             self.residue_panel,
             self.residue_barcode_panel,
@@ -457,6 +878,11 @@ class AnalyticsWorkspace(QtCore.QObject):
             self.similarity_panel,
             self.compare_panel,
             self.retention_panel,
+            self.state_population_panel,
+            self.state_timeline_panel,
+            self.transition_panel,
+            self.uncertainty_panel,
+            self.compare_uncertainty_panel,
         ):
             panel._dispose_canvas()
 
@@ -480,7 +906,9 @@ class AnalyticsWorkspace(QtCore.QObject):
             metrics = [
                 item
                 for item in episode_statistics(
-                    self._result, AnalysisContext(mode="md")
+                    self._result,
+                    AnalysisContext(mode="md"),
+                    series=self._series,
                 )
                 if item.receptor_residue == residue
             ]

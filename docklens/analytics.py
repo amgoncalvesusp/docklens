@@ -7,12 +7,15 @@ interaction type. Raw atom-pair rows remain available in ``RunResult.details``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Tuple
+from typing import TYPE_CHECKING, Iterable, Tuple
 
 import numpy as np
 import pandas as pd
 
 from .results import RunResult
+
+if TYPE_CHECKING:
+    from .observation_series import ObservationSeries
 
 
 _MODES = frozenset({"docking", "md"})
@@ -241,11 +244,22 @@ def _consecutive_run_lengths(indices: Iterable[int]) -> Tuple[int, ...]:
 
 
 def episode_statistics(
-    result: RunResult, context: AnalysisContext | None = None
+    result: RunResult,
+    context: AnalysisContext | None = None,
+    *,
+    series: ObservationSeries | None = None,
 ) -> Tuple[EpisodeStatistic, ...]:
     """Summarize saved-frame occupancy and continuous interaction episodes."""
     context = context or AnalysisContext(mode="md")
     observations = observation_ids(result)
+    if series is not None:
+        if series.mode != "md":
+            raise ValueError("episode statistics require an MD observation series")
+        if set(series.observation_ids) != set(observations):
+            raise ValueError(
+                "observation series IDs must match the analytical result"
+            )
+        observations = series.observation_ids
     index = {pose_id: position for position, pose_id in enumerate(observations)}
     grouped = {}
     for pose_id, residue, kind, is_key in _presence_records(result):
@@ -263,7 +277,13 @@ def episode_statistics(
     total = len(observations)
     metrics = []
     for (residue, kind), entry in sorted(grouped.items()):
-        runs = _consecutive_run_lengths(entry["indices"])
+        if series is None:
+            runs = _consecutive_run_lengths(entry["indices"])
+        else:
+            active_ids = {
+                observations[position] for position in set(entry["indices"])
+            }
+            runs = _series_run_lengths(active_ids, series)
         count = len(set(entry["indices"]))
         longest = max(runs, default=0)
         mean_run = float(np.mean(runs)) if runs else 0.0
@@ -287,6 +307,37 @@ def episode_statistics(
             )
         )
     return tuple(metrics)
+
+
+def _series_run_lengths(
+    active_ids: set[str], series: ObservationSeries
+) -> Tuple[int, ...]:
+    """Measure active runs without joining replicas or missing frame indices."""
+    runs = []
+    current_length = 0
+    previous = None
+    for point in series.points:
+        boundary = (
+            previous is None
+            or point.replica_id != previous.replica_id
+            or (
+                point.frame_index is not None
+                and previous.frame_index is not None
+                and point.frame_index != previous.frame_index + 1
+            )
+        )
+        if boundary and current_length:
+            runs.append(current_length)
+            current_length = 0
+        if point.observation_id in active_ids:
+            current_length += 1
+        elif current_length:
+            runs.append(current_length)
+            current_length = 0
+        previous = point
+    if current_length:
+        runs.append(current_length)
+    return tuple(runs)
 
 
 def differential_prevalence(

@@ -15,6 +15,7 @@ from docklens.analytics import (
     fingerprint_similarity,
     residue_type_prevalence,
 )
+from docklens.observation_series import ObservationPoint, ObservationSeries
 from docklens.results import Detail, Endpoint, Summary, make_result
 
 
@@ -165,6 +166,36 @@ def test_md_episode_statistics_report_occupancy_runs_and_time():
     assert metric.mean_episode_observations == 2.5
     assert metric.longest_episode_ns == 0.75
     assert metric.mean_distance_A == pytest.approx(2.9)
+
+
+def test_md_episodes_do_not_cross_replica_boundaries_or_frame_gaps():
+    result = _result(
+        ["a1", "a2", "b1", "b3"],
+        [
+            ("a2", "GLU166", "hbond", "H1", "OE1", 2.8),
+            ("b1", "GLU166", "hbond", "H2", "OE1", 2.9),
+            ("b3", "GLU166", "hbond", "H3", "OE2", 3.0),
+        ],
+    )
+    series = ObservationSeries(
+        mode="md",
+        points=(
+            ObservationPoint("a1", 0, frame_index=1, replica_id="A"),
+            ObservationPoint("a2", 1, frame_index=2, replica_id="A"),
+            ObservationPoint("b1", 2, frame_index=1, replica_id="B"),
+            ObservationPoint("b3", 3, frame_index=3, replica_id="B"),
+        ),
+        time_step_ns=0.25,
+    )
+
+    metric = episode_statistics(
+        result,
+        AnalysisContext(mode="md", time_step_ns=0.25),
+        series=series,
+    )[0]
+
+    assert metric.episode_count == 3
+    assert metric.longest_episode_observations == 1
 
 
 def test_differential_prevalence_uses_independent_denominators():

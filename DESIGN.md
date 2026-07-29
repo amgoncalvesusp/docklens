@@ -174,6 +174,31 @@ Plots use paper-white backgrounds and one-pixel structural rules. Interaction
 colors belong to evidence marks only. Every chart owns a tidy dataframe and
 reproducibility metadata, exported together through the figure bundle.
 
+### Pose Families & Dynamic States
+
+Advanced fingerprint analysis remains inside the Fingerprint workspace.
+Population, timeline, observed-transition and confidence views use compact
+internal tabs so they do not compete with the four peer workspaces. State
+colors form a separate categorical channel and never reuse interaction-type
+colors. `OUTLIER` is always labeled and rendered neutrally.
+
+Docking uses “pose family” and “frequency”; MD uses “interaction state”,
+“occupancy”, “episode” and “observed transition”. Transition plots must state
+that they are descriptive rather than validated Markov models. Long bootstrap
+calculations run in background workers while existing evidence remains visible.
+The MD controls expose a trajectory-map action beside the saved-frame step.
+Status text distinguishes the implicit contiguous fallback from an explicit
+map and summarizes replica and gap counts. The Fingerprint header contains an
+explicit export-view selector so export never depends on whichever internal
+panel happened to be active.
+
+### Reproducible Projects
+
+Open and Save project actions live in the navigation rail as persistent
+workflow actions. Stale external sources produce a visible warning while
+verified cached evidence remains readable. Integrity verification must never
+be described as cryptographic authorship or authenticity.
+
 ### DockLens Lens
 
 The Lens is the signature inspector. It names the selected residue, reports the

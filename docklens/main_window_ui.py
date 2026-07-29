@@ -41,6 +41,7 @@ def _toolbar(window):
     open_folder = QtWidgets.QPushButton("Open folder")
     run = QtWidgets.QPushButton("Run detection")
     run.setObjectName("primary")
+    window.run_detection_button = run
     reset = QtWidgets.QPushButton("Reset")
     open_files.clicked.connect(window._open_files)
     open_folder.clicked.connect(window._open_folder)
@@ -116,12 +117,31 @@ def _navigation(window):
         window.workspace_buttons.append(button)
         layout.addWidget(button)
     layout.addStretch(1)
+    window.open_project_button = QtWidgets.QPushButton("Open project")
+    window.open_project_button.setObjectName("navButton")
+    window.open_project_button.clicked.connect(window._open_project)
+    layout.addWidget(window.open_project_button)
+    window.save_project_button = QtWidgets.QPushButton("Save project")
+    window.save_project_button.setObjectName("navButton")
+    window.save_project_button.setEnabled(False)
+    window.save_project_button.clicked.connect(window._save_project)
+    layout.addWidget(window.save_project_button)
     about = QtWidgets.QPushButton("About")
     about.setObjectName("navButton")
     about.clicked.connect(window._about)
     layout.addWidget(about)
+    layout.activate()
+    rail.setMinimumHeight(layout.sizeHint().height())
     window.nav_rail = rail
-    return rail
+    area = QtWidgets.QScrollArea()
+    area.setObjectName("navigationScroll")
+    area.setWidgetResizable(True)
+    area.setFrameShape(QtWidgets.QFrame.NoFrame)
+    area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+    area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+    area.setWidget(rail)
+    window.nav_scroll_area = area
+    return area
 
 
 def _filters_card(window):
@@ -300,6 +320,9 @@ def build_main_window_ui(window, resource_path):
     root.addWidget(context_bar)
     window.analytics_workspace = AnalyticsWorkspace(window)
     window.analytics_workspace.residueSelected.connect(window._update_lens)
+    window.analytics_workspace.representativeSelected.connect(
+        window._open_representative
+    )
     window.workspace_stack = QtWidgets.QStackedWidget()
     window.workspace_stack.addWidget(window.analytics_workspace.residue_page)
     window.workspace_stack.addWidget(

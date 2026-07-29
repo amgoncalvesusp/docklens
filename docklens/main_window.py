@@ -23,6 +23,7 @@ from .analysis_profiles import build_analysis_view
 from .figure_export import export_figure_bundle
 from .integration_result import write_integration_result
 from .main_window_ui import build_main_window_ui
+from .project_controller import ProjectControllerMixin
 from .residue_keys import match_key_residues, parse_key_residues
 
 INVENTOR = "Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA)"
@@ -107,7 +108,7 @@ def resource_path(name):
     return os.path.join(os.path.dirname(__file__), "assets", name)
 
 
-class MainWindow(QtWidgets.QMainWindow):
+class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DockLens")
@@ -116,7 +117,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._files = []
         self._result = None
         self._comparison_result = None
+        self._comparison_files = []
         self._launch_manifest = None
+        self._project_stale = False
         self._syncing = False
         self._key_invalid_tokens = ()
         self.setStyleSheet(_STYLE)
@@ -146,12 +149,18 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if files:
             self._files = list(files)
+            self.analytics_workspace.clear_observation_series()
+            self._project_stale = False
+            self.run_detection_button.setEnabled(True)
             self.status.showMessage("%d file(s) selected." % len(files))
 
     def _open_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select folder")
         if folder:
             self._files = [folder]
+            self.analytics_workspace.clear_observation_series()
+            self._project_stale = False
+            self.run_detection_button.setEnabled(True)
             self.status.showMessage("Folder selected: %s" % folder)
 
     def _selected_types(self):
@@ -193,6 +202,10 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         self._comparison_result = comparison
+        self._comparison_files = list(files)
+        self.analytics_workspace.set_observation_series(
+            None, comparison=True, refresh=False
+        )
         self._refresh_tables()
         self.workspace_stack.setCurrentIndex(2)
         self.status.showMessage(
@@ -318,6 +331,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._key_invalid_tokens = ()
         self.key_edit.setText(" ".join(manifest.key_residues))
         self._files = [str(manifest.receptor_path), str(manifest.poses_path)]
+        self.analytics_workspace.clear_observation_series()
         self._launch_manifest = manifest
         try:
             self._result = br.run_paired(
@@ -373,6 +387,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_tables(self):
         if self._result is None:
             return
+        self.save_project_button.setEnabled(True)
         view = build_analysis_view(self._result, self._analysis_profile())
         self.summary_model.set_dataframe(export.summary_dataframe(view))
         self.coverage_model.set_dataframe(export.key_residue_coverage_dataframe(view))
@@ -541,7 +556,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.coverage_model.set_dataframe(pd.DataFrame())
         self.detail_model.set_dataframe(pd.DataFrame())
         self.analytics_workspace.set_comparison(None)
+        self.analytics_workspace.clear_observation_series()
         self.analytics_workspace.set_result(None)
+        self.save_project_button.setEnabled(False)
+        self.run_detection_button.setEnabled(True)
+        self._project_stale = False
         self.dataset_context.setText("No dataset loaded")
         self._update_lens("")
         self._update_key_status()
