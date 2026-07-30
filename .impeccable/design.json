@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-28T12:00:00-03:00",
+  "title": "Design System: DockLens",
+  "extensions": {
+    "colorMeta": {
+      "instrument-frame": {
+        "role": "primary",
+        "displayName": "Deep Instrument Navy",
+        "canonical": "#071A2E",
+        "tonalRamp": ["#020A12", "#071A2E", "#123654", "#245576", "#477693", "#789CB4", "#B7C9D8", "#EEF5F8"]
+      },
+      "navigation-accent": {
+        "role": "primary",
+        "displayName": "Selection Blue",
+        "canonical": "#0072B2",
+        "tonalRamp": ["#002238", "#003E61", "#005A8A", "#0072B2", "#3F91C2", "#78B1D4", "#B3D3E6", "#EAF5FB"]
+      },
+      "analytical-paper": {
+        "role": "neutral",
+        "displayName": "Cool Analytical Paper",
+        "canonical": "#F7F9FA",
+        "tonalRamp": ["#1C2327", "#39444A", "#5B6970", "#819098", "#AAB6BC", "#CFD7DB", "#E8ECEE", "#F7F9FA"]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Workspace Title",
+        "purpose": "Application identity and analytical workspace headings."
+      },
+      "body": {
+        "displayName": "Scientific Body",
+        "purpose": "Controls, explanations and auditable evidence."
+      },
+      "section": {
+        "displayName": "Section Heading",
+        "purpose": "Inspector and analytical-field section labels."
+      },
+      "label": {
+        "displayName": "Compact Label",
+        "purpose": "Navigation, selectors and dense table context."
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      {
+        "name": "compact-inspector",
+        "value": "1080px"
+      },
+      {
+        "name": "compact-navigation",
+        "value": "820px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Detection Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single strong action used to start interaction detection.",
+      "html": "<button class=\"ds-btn-primary\">Run detection</button>",
+      "css": ".ds-btn-primary { background:#071A2E; color:#fff; border:1px solid #071A2E; border-radius:4px; padding:7px 11px; font:700 12px Aptos,Segoe UI,sans-serif; } .ds-btn-primary:hover { background:#123654; } .ds-btn-primary:focus-visible { outline:2px solid #0072B2; outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Action",
+      "kind": "button",
+      "description": "Compact file, comparison and export actions.",
+      "html": "<button class=\"ds-btn-secondary\">Export figure</button>",
+      "css": ".ds-btn-secondary { background:#fff; color:#172733; border:1px solid #AEBBC4; border-radius:4px; padding:7px 11px; font:400 12px Aptos,Segoe UI,sans-serif; } .ds-btn-secondary:hover { background:#D8E0E5; } .ds-btn-secondary:focus-visible { outline:2px solid #0072B2; outline-offset:2px; }"
+    },
+    {
+      "name": "Profile Selector",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Keeps Complete and Discovery Studio-like analysis visible.",
+      "html": "<label class=\"ds-field-label\">Profile<select class=\"ds-field\"><option>Discovery Studio-like</option></select></label>",
+      "css": ".ds-field-label { color:#142330; display:flex; align-items:center; gap:8px; font:600 11px Aptos,Segoe UI,sans-serif; } .ds-field { background:#fff; color:#142330; border:1px solid #AEBBC4; border-radius:4px; padding:5px 7px; font:400 12px Aptos,Segoe UI,sans-serif; } .ds-field:focus-visible { outline:2px solid #0072B2; outline-offset:1px; }"
+    },
+    {
+      "name": "Workspace Navigation",
+      "kind": "nav",
+      "description": "Deep-navy peer-workspace rail with one active selection.",
+      "html": "<nav class=\"ds-nav\"><button>Residues</button><button class=\"is-active\">Fingerprint</button><button>Compare</button><button>Tables</button></nav>",
+      "css": ".ds-nav { width:150px; padding:16px 8px; background:#071A2E; display:grid; gap:6px; } .ds-nav button { background:transparent; color:#DCE7EE; border:0; border-radius:3px; padding:10px 12px; text-align:left; font:600 12px Aptos,Segoe UI,sans-serif; } .ds-nav button:hover { background:#102E49; color:#fff; } .ds-nav button.is-active { background:#0072B2; color:#fff; } .ds-nav button:focus-visible { outline:2px solid #fff; outline-offset:1px; }"
+    },
+    {
+      "name": "DockLens Lens",
+      "kind": "custom",
+      "description": "Persistent evidence inspector synchronized to the selected residue.",
+      "html": "<aside class=\"ds-lens\"><h3>DockLens Lens</h3><strong>GLU166</strong><p>hbond: 74.0% (371/500)</p><small>Profile: Discovery Studio-like</small></aside>",
+      "css": ".ds-lens { width:260px; background:#fff; color:#142330; border-left:1px solid #D8E0E5; padding:18px 16px; font:400 12px Aptos,Segoe UI,sans-serif; } .ds-lens h3 { margin:0 0 18px; font-size:14px; } .ds-lens strong { display:block; font-size:20px; margin-bottom:12px; } .ds-lens small { display:block; background:#EDF3F6; border:1px solid #CAD7DE; border-radius:3px; color:#294151; padding:7px 10px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Reciprocal-Space Atlas",
+    "overview": "DockLens feels like a contemporary structural-biology instrument: precise enough for dense scientific evidence, calm enough for long analysis sessions, and organized around residues, interaction channels and temporal states.",
+    "keyCharacteristics": [
+      "Restrained analytical surfaces with one strong navigational accent.",
+      "Okabe-Ito interaction colors used only as scientific category semantics.",
+      "Wide data viewports, compact controls and a persistent contextual inspector.",
+      "Crisp plot fields, restrained contours and sparse depth.",
+      "Familiar desktop behavior with high-DPI and compact-screen adaptation."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Color Rule",
+        "body": "Interaction colors never decorate containers, navigation or headings; they identify interaction evidence only.",
+        "section": "colors"
+      },
+      {
+        "name": "The Single Focus Rule",
+        "body": "Primary accent marks the current task, selection and keyboard focus, never multiple competing calls to action.",
+        "section": "colors"
+      },
+      {
+        "name": "The Data Owns the Viewport Rule",
+        "body": "Controls frame the evidence; they do not consume the area required to compare residues, poses or frames.",
+        "section": "layout"
+      }
+    ],
+    "dos": [
+      "Do keep filters, charts and tables synchronized through the DockLens Lens.",
+      "Do label docking frequency and molecular-dynamics occupancy distinctly.",
+      "Do expose the counting unit and denominator beside every aggregate chart.",
+      "Do preserve the Discovery Studio-like profile as a visible analytical choice with its parameters available for audit.",
+      "Do export the data and parameters behind every figure."
+    ],
+    "donts": [
+      "Don't use interaction colors as general UI decoration.",
+      "Don't hide raw evidence behind a composite score.",
+      "Don't place every analysis inside identical cards.",
+      "Don't rely on hover for essential scientific information.",
+      "Don't imply that docking poses are temporal observations."
+    ]
+  }
+}

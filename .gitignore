@@ -32,3 +32,6 @@ Thumbs.db
 /tmp_2m5dInteractions.xlsx
 /tmp_2m5dBestSolutions/
 /dsv_corpus_extract_tmp.mjs
+# Impeccable and browser review runtime artifacts
+/.impeccable/questions/
+/.playwright-mcp/
