@@ -8,6 +8,7 @@ import time
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from docklens import batch_runner as br
+from docklens import main_window as main_window_module
 from docklens.analytics_widgets import AnalyticsWorkspace, ChartPanel
 from docklens.main_window import MainWindow
 from docklens.plotting import build_residue_chart
@@ -31,6 +32,185 @@ def test_v1_workspace_navigation_and_ds_like_profile_are_always_available(qtbot)
     )
     assert window.observation_label_combo.currentData() == "ligand"
     assert window.observation_label_combo.isEnabled()
+    assert window.export_figure_button.text() == "Export figure"
+    assert window.export_all_tiff_button.text() == "Export all TIFFs"
+
+
+def test_workspace_exposes_each_generated_chart_once_for_batch_export(
+    qtbot, fixture_path
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = br.run([fixture_path("minimal_complex.pdb")])
+    window._refresh_tables()
+
+    artifacts = window.analytics_workspace.exportable_artifacts()
+
+    assert tuple(artifacts) == (
+        "residue-profile",
+        "interaction-heatmap",
+        "interaction-fingerprint",
+        "interaction-similarity",
+        "state-population",
+        "state-timeline",
+    )
+    assert all(artifact is not None for artifact in artifacts.values())
+
+
+def test_individual_tiff_export_uses_600_dpi(qtbot, fixture_path, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = br.run([fixture_path("minimal_complex.pdb")])
+    window._refresh_tables()
+    destination = tmp_path / "residue-profile"
+    captured = {}
+
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *_args, **_kwargs: (
+            str(destination),
+            "TIFF publication image (*.tiff *.tif)",
+        ),
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "export_figure_bundle",
+        lambda artifact, path, **kwargs: captured.update(
+            artifact=artifact, path=path, **kwargs
+        )
+        or (str(destination),),
+    )
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *_args: None)
+
+    window._export_figure()
+
+    assert captured["path"] == str(destination)
+    assert captured["formats"] == ("tiff",)
+    assert captured["dpi"] == 600
+
+
+def test_batch_tiff_export_uses_all_available_artifacts(
+    qtbot, fixture_path, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = br.run([fixture_path("minimal_complex.pdb")])
+    window._refresh_tables()
+    captured = {}
+
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getExistingDirectory",
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "export_tiff_collection",
+        lambda artifacts, path, **kwargs: captured.update(
+            artifacts=artifacts, path=path, **kwargs
+        )
+        or (str(tmp_path / "manifest.json"),),
+    )
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *_args: None)
+
+    window._export_all_tiff()
+
+    assert tuple(captured["artifacts"]) == (
+        "residue-profile",
+        "interaction-heatmap",
+        "interaction-fingerprint",
+        "interaction-similarity",
+        "state-population",
+        "state-timeline",
+    )
+    assert captured["path"] == str(tmp_path)
+    assert captured["dpi"] == 600
+    assert callable(captured["metadata_factory"])
+
+
+def test_batch_export_adds_only_applicable_dynamic_and_comparison_charts(
+    qtbot, fixture_path
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    result = br.run([fixture_path("minimal_complex.pdb")])
+    window._result = result
+    window.mode_combo.setCurrentIndex(window.mode_combo.findData("md"))
+    window._refresh_tables()
+    workspace = window.analytics_workspace
+    workspace.set_comparison(result)
+
+    artifacts = workspace.exportable_artifacts()
+
+    assert "state-transitions" in artifacts
+    assert "system-comparison" in artifacts
+    assert "docking-md-retention" not in artifacts
+
+    workspace.system_a_role.setCurrentIndex(
+        workspace.system_a_role.findData("docking")
+    )
+    workspace.system_b_role.setCurrentIndex(
+        workspace.system_b_role.findData("md")
+    )
+
+    assert "docking-md-retention" in workspace.exportable_artifacts()
+
+
+def test_batch_export_excludes_hidden_stale_comparison_confidence(
+    qtbot, fixture_path
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    result = br.run([fixture_path("minimal_complex.pdb")])
+    window._result = result
+    window._refresh_tables()
+    workspace = window.analytics_workspace
+    workspace.set_comparison(result)
+    workspace.compare_uncertainty_panel.set_artifact(
+        build_residue_chart(result)
+    )
+    workspace.compare_uncertainty_panel.setVisible(False)
+
+    assert "comparison-confidence" not in workspace.exportable_artifacts()
+
+
+def test_batch_tiff_export_cancel_does_not_write(
+    qtbot, fixture_path, monkeypatch
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._result = br.run([fixture_path("minimal_complex.pdb")])
+    window._refresh_tables()
+    called = []
+
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getExistingDirectory",
+        lambda *_args, **_kwargs: "",
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "export_tiff_collection",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+
+    window._export_all_tiff()
+
+    assert called == []
+
+
+def test_scientific_profile_selector_exposes_all_native_and_hybrid_modes(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert [
+        window.preset_combo.itemData(index)
+        for index in range(window.preset_combo.count())
+    ] == ["plip", "luna", "dsv", "luna_dsv"]
+    assert "LUNA × DSV" in window.preset_combo.itemText(
+        window.preset_combo.findData("luna_dsv")
+    )
 
 
 def test_header_labels_are_transparent_and_high_contrast(qtbot):

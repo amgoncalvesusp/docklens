@@ -85,11 +85,15 @@ def _toolbar(window):
     for button in (run, reset):
         action_row.addWidget(button)
     action_row.addSpacing(16)
-    action_row.addWidget(QtWidgets.QLabel("Criteria:"))
+    action_row.addWidget(QtWidgets.QLabel("Scientific profile:"))
     window.preset_combo = QtWidgets.QComboBox()
-    window.preset_combo.addItem("PLIP (default)", "plip")
+    window.preset_combo.addItem("PLIP (legacy default)", "plip")
+    window.preset_combo.addItem("LUNA 0.14 defaults", "luna")
     window.preset_combo.addItem(
-        "DS-calibrated beta (explicit-H geometry)", "dsv"
+        "DSV-like (Discovery Studio 2024 defaults)", "dsv"
+    )
+    window.preset_combo.addItem(
+        "LUNA × DSV conservative", "luna_dsv"
     )
     action_row.addWidget(window.preset_combo)
     action_row.addSpacing(12)
@@ -151,6 +155,12 @@ def _toolbar(window):
     window.export_figure_button = QtWidgets.QPushButton("Export figure")
     window.export_figure_button.clicked.connect(window._export_figure)
     scope_row.addWidget(window.export_figure_button)
+    window.export_all_tiff_button = QtWidgets.QPushButton("Export all TIFFs")
+    window.export_all_tiff_button.setToolTip(
+        "Export every generated chart as a publication-quality 600 DPI TIFF."
+    )
+    window.export_all_tiff_button.clicked.connect(window._export_all_tiff)
+    scope_row.addWidget(window.export_all_tiff_button)
     export_csv = QtWidgets.QPushButton("CSV")
     export_xlsx = QtWidgets.QPushButton("XLSX")
     export_csv.clicked.connect(window._export_csv)

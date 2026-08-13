@@ -101,7 +101,7 @@ def test_types_and_preset_are_normalized_and_deduplicated(fixture_path):
     [
         ({"types": ["hbond", "made_up"]}, "Unknown interaction type"),
         ({"types": []}, "At least one interaction type"),
-        ({"hbond_preset": "unknown"}, "Unknown H-bond preset"),
+        ({"hbond_preset": "unknown"}, "Unknown scientific profile"),
         ({"max_file_size_bytes": 0}, "max_file_size_bytes"),
     ],
 )

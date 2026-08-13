@@ -16,6 +16,8 @@ _DS_LIKE_TYPES = frozenset(
         "hbond",
         "carbon_hbond",
         "saltbridge",
+        "attractive_charge",
+        "charge_repulsion",
         "pipi",
         "pi_sigma",
         "pication",
@@ -28,6 +30,7 @@ _DS_LIKE_TYPES = frozenset(
         "pi_donor_hbond",
         "pi_anion",
         "pi_lone_pair",
+        "chalcogen",
     }
 )
 _DS_LIKE_MAX_SALTBRIDGE_DISTANCE_A = 4.0

@@ -271,8 +271,8 @@ def test_dsv_rejects_explicit_hbond_without_acceptor_base_geometry():
 def test_dsv_uses_explicit_hydrogen_geometry_instead_of_heavy_atom_proxy():
     donor = _atom(0, "N", "N", (0, 0, 0), sybyl_type="N.am")
     hydrogen = _atom(1, "H", "HN", (1, 0, 0))
-    acceptor = _atom(2, "O", "O", (3.9, 0, 0), sybyl_type="O.2", side="ligand")
-    acceptor_base = _atom(3, "C", "C", (3.9, 1, 0), sybyl_type="C.2", side="ligand")
+    acceptor = _atom(2, "O", "O", (3.3, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(3, "C", "C", (3.3, 1, 0), sybyl_type="C.2", side="ligand")
     _bond(donor, hydrogen)
     _bond(acceptor, acceptor_base, "2")
 
@@ -286,7 +286,7 @@ def test_dsv_uses_explicit_hydrogen_geometry_instead_of_heavy_atom_proxy():
 
     assert len(records) == 1
     assert records[0]["hydrogen_obj"] is hydrogen
-    assert records[0]["hydrogen_acceptor_distance"] == pytest.approx(2.9)
+    assert records[0]["hydrogen_acceptor_distance"] == pytest.approx(2.3)
     assert records[0]["donor_hydrogen_acceptor_angle"] == pytest.approx(180.0)
     assert records[0]["hydrogen_acceptor_base_angle"] == pytest.approx(90.0)
 
@@ -314,8 +314,8 @@ def test_dsv_emits_one_auditable_record_per_qualifying_hydrogen():
     donor = _atom(0, "N", "ND2", (0, 0, 0), sybyl_type="N.am")
     hydrogen_1 = _atom(1, "H", "HD21", (1, 0.1, 0))
     hydrogen_2 = _atom(2, "H", "HD22", (1, -0.1, 0))
-    acceptor = _atom(3, "O", "O", (3.5, 0, 0), sybyl_type="O.2", side="ligand")
-    acceptor_base = _atom(4, "C", "C", (3.5, 0, 1), sybyl_type="C.2", side="ligand")
+    acceptor = _atom(3, "O", "O", (3.3, 0, 0), sybyl_type="O.2", side="ligand")
+    acceptor_base = _atom(4, "C", "C", (3.3, 0, 1), sybyl_type="C.2", side="ligand")
     _bond(donor, hydrogen_1)
     _bond(donor, hydrogen_2)
     _bond(acceptor, acceptor_base, "2")
@@ -599,8 +599,8 @@ USER_CHARGES
 @<TRIPOS>ATOM
 1 N  0.0 0.0 0.0 N.am 1 ASN1  0.0
 2 HN 1.0 0.0 0.0 H    1 ASN1  0.0
-3 O  3.9 0.0 0.0 O.2  2 LIG1 -0.4
-4 C  3.9 1.0 0.0 C.2  2 LIG1  0.4
+3 O  3.3 0.0 0.0 O.2  2 LIG1 -0.4
+4 C  3.3 1.0 0.0 C.2  2 LIG1  0.4
 @<TRIPOS>BOND
 1 1 2 1
 2 3 4 2
@@ -620,7 +620,7 @@ USER_CHARGES
 
     assert len(result.details) == 1
     assert frame.loc[0, "hydrogen_atom"] == "HN"
-    assert frame.loc[0, "hydrogen_acceptor_distance_A"] == pytest.approx(2.9)
+    assert frame.loc[0, "hydrogen_acceptor_distance_A"] == pytest.approx(2.3)
     assert frame.loc[0, "donor_hydrogen_acceptor_angle_deg"] == pytest.approx(180.0)
     assert frame.loc[0, "hydrogen_acceptor_base_angle_deg"] == pytest.approx(90.0)
 
@@ -701,20 +701,23 @@ def test_dsv_pi_alkyl_counts_one_semantic_ring_group_pair():
     assert len(records) == 1
 
 
-def test_dsv_profile_uses_the_discovery_studio_geometry_observed_in_2m5d():
+def test_dsv_profile_uses_discovery_studio_2024_runtime_defaults():
     cutoffs = core.cutoffs_for_preset("dsv")
 
-    assert cutoffs["pialkyl_dist"] == pytest.approx(4.9)
-    assert cutoffs["alkyl_dist"] == pytest.approx(4.2)
+    assert cutoffs["hbond_dist"] == pytest.approx(3.4)
+    assert cutoffs["carbon_hbond_dist"] == pytest.approx(3.8)
+    assert cutoffs["saltbridge_dist"] == pytest.approx(4.0)
+    assert cutoffs["pialkyl_dist"] == pytest.approx(5.5)
+    assert cutoffs["alkyl_dist"] == pytest.approx(5.5)
     assert cutoffs["metal_dist"] == pytest.approx(3.0)
-    assert cutoffs["pi_sulfur_dist"] == pytest.approx(5.3)
-    assert cutoffs["pi_sigma_h_centroid_dist"] == pytest.approx(4.3)
-    assert cutoffs["pi_sigma_axis_angle"] == pytest.approx(40.0)
+    assert cutoffs["pi_sulfur_edge_dist"] == pytest.approx(6.0)
+    assert cutoffs["pi_sulfur_face_dist"] == pytest.approx(4.5)
+    assert cutoffs["pi_sigma_carbon_dist"] == pytest.approx(4.0)
+    assert cutoffs["pi_sigma_axis_angle"] == pytest.approx(45.0)
     assert cutoffs["pi_sigma_dha_angle"] == pytest.approx(160.0)
-    assert cutoffs["pi_donor_dist"] == pytest.approx(5.2)
-    assert cutoffs["pi_donor_h_centroid_dist"] == pytest.approx(4.1)
+    assert cutoffs["pi_donor_dist"] == pytest.approx(4.2)
     assert cutoffs["pi_donor_axis_angle"] == pytest.approx(45.0)
-    assert cutoffs["pi_donor_dha_angle"] == pytest.approx(145.0)
+    assert cutoffs["pi_donor_dha_angle"] == pytest.approx(140.0)
 
 
 def test_dsv_pi_sigma_accepts_observed_hydrogen_centroid_distance():
@@ -745,14 +748,14 @@ def test_dsv_pi_donor_accepts_observed_theta_limit():
         11,
         "H",
         "H1",
-        tuple(3.9 * component for component in direction),
+        tuple(3.1 * component for component in direction),
         side="ligand",
     )
     donor = _atom(
         10,
         "N",
         "N1",
-        tuple(4.9 * component for component in direction),
+        tuple(4.1 * component for component in direction),
         sybyl_type="N.am",
         side="ligand",
     )
@@ -771,3 +774,6 @@ def test_dsv_pi_donor_accepts_observed_theta_limit():
 def test_new_dsv_interaction_types_are_exportable():
     assert "pi_sigma" in core.VALID_TYPES
     assert "pi_donor_hbond" in core.VALID_TYPES
+    assert "chalcogen" in core.VALID_TYPES
+    assert "attractive_charge" in core.VALID_TYPES
+    assert "charge_repulsion" in core.VALID_TYPES

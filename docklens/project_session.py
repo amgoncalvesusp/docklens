@@ -299,7 +299,7 @@ def methods_summary(project: ProjectState) -> str:
         "DockLens reproducible analysis\n"
         "Application version: {version}\n"
         "Analysis profile: {profile}\n"
-        "Hydrogen-bond preset: {preset}\n"
+        "Scientific interaction profile: {preset}\n"
         "Primary dataset: {label} ({mode}).{comparison}\n"
         "Primary observation axis: {time_axis}.\n"
         "Trajectory mapping: {axis_source}.{comparison_axis}\n"

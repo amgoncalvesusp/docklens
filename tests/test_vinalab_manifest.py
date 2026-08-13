@@ -59,6 +59,29 @@ def test_vinalab_manifest_loads_confined_hashed_pair(tmp_path, fixture_path):
     assert manifest.result_path == manifest_path.parent / "docklens_result_run-1.json"
 
 
+@pytest.mark.parametrize("profile", ("plip", "luna", "dsv", "luna_dsv"))
+def test_vinalab_manifest_accepts_scientific_profiles(
+    tmp_path, fixture_path, profile
+):
+    manifest_path, _receptor, _poses = _paired_files(
+        tmp_path / profile, fixture_path
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["options"]["hbond_preset"] = profile
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_manifest(manifest_path).hbond_preset == profile
+
+
+def test_vinalab_manifest_normalizes_scientific_profile(tmp_path, fixture_path):
+    manifest_path, _receptor, _poses = _paired_files(tmp_path, fixture_path)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["options"]["hbond_preset"] = " LUNA_DSV "
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_manifest(manifest_path).hbond_preset == "luna_dsv"
+
+
 def test_vinalab_manifest_rejects_path_escape_and_hash_mismatch(tmp_path, fixture_path):
     manifest_path, _receptor, _poses = _paired_files(tmp_path, fixture_path)
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))

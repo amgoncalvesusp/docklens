@@ -1,0 +1,86 @@
+criterion	current	default	unit
+unfavorable_Bump_FractionVdwDistanceMinimum	0.700000	0.700000	fraction
+electrostatic_ChargeCharge_DistanceMaximum	5.600000	5.600000	angstrom
+halogenBond_F_DistanceMaximum	3.700000	3.700000	angstrom
+halogenBond_ClBrI_FractionVdwDistanceMaximum	1.000000	1.000000	fraction
+halogenBond_CXB_AngleMinimum	120.000000	120.000000	degree
+halogenBond_CXB_AngleMaximum	180.000000	180.000000	degree
+halogenBond_XBY_AngleMinimum	75.000000	75.000000	degree
+halogenBond_XBY_AngleMaximum	180.000000	180.000000	degree
+hydrogenBond_Strong_DonorAcceptor_DistanceMaximum	3.400000	3.400000	angstrom
+hydrogenBond_Weak_DonorAcceptor_DistanceMaximum	3.800000	3.800000	angstrom
+hydrogenBond_SaltBridge_DonorAcceptor_DistanceMaximum	4.000000	4.000000	angstrom
+hydrogenBond_DHA_AngleMinimum	90.000000	90.000000	degree
+hydrogenBond_DHA_AngleMaximum	180.000000	180.000000	degree
+hydrogenBond_HAY_AngleMinimum	90.000000	90.000000	degree
+hydrogenBond_HAY_AngleMaximum	180.000000	180.000000	degree
+hydrogenBond_XDA_AngleMinimum	90.000000	90.000000	degree
+hydrogenBond_XDA_AngleMaximum	180.000000	180.000000	degree
+hydrogenBond_SpDonor_XDA_AngleMinimum	135.000000	135.000000	degree
+hydrogenBond_DAY_AngleMinimum	90.000000	90.000000	degree
+hydrogenBond_DAY_AngleMaximum	180.000000	180.000000	degree
+unfavorable_AcceptorAcceptor_DistanceMaximum	3.000000	3.000000	angstrom
+unfavorable_ALLA_TorsionAngleMaximum	15.000000	15.000000	degree
+unfavorable_ALA_AngleMinimum	90.000000	90.000000	degree
+unfavorable_ALA_AngleMaximum	180.000000	180.000000	degree
+unfavorable_HHD_AngleMinimum	120.000000	120.000000	degree
+electrostatic_CationPi_DistanceMaximum	5.000000	5.000000	angstrom
+electrostatic_CationPi_AngleMaximum	40.000000	40.000000	degree
+electrostatic_AnionPi_DistanceMaximum	5.000000	5.000000	angstrom
+electrostatic_AnionPi_AngleMaximum	40.000000	40.000000	degree
+hydrogenBond_DonorPi_DistanceMaximum	4.200000	4.200000	angstrom
+hydrogenBond_DonorPi_AngleMaximum	45.000000	45.000000	degree
+hydrogenBond_DonorPi_DeviationAngleMaximum	40.000000	40.000000	degree
+hydrophobic_SigmaPi_DistanceMaximum	4.000000	4.000000	angstrom
+hydrophobic_SigmaPi_AngleMaximum	45.000000	45.000000	degree
+hydrophobic_SigmaPi_DeviationAngleMaximum	20.000000	20.000000	degree
+sulfurBond_PiEdgeOn_DistanceMaximum	6.000000	6.000000	angstrom
+sulfurBond_PiEdgeOn_AngleMinimum	70.000000	70.000000	degree
+sulfurBond_PiFaceOn_DistanceMaximum	4.500000	4.500000	angstrom
+sulfurBond_PiFaceOn_AngleMaximum	25.000000	25.000000	degree
+lonePair_Pi_DistanceMaximum	3.000000	3.000000	angstrom
+lonePair_Pi_AngleMaximum	45.000000	45.000000	degree
+hydrophobic_PiPi_CenterDistanceMaximum	6.000000	6.000000	angstrom
+hydrophobic_PiPi_ClosestAtomDistanceMaximum	4.500000	4.500000	angstrom
+hydrophobic_PiPiStacked_ThetaAngleMaximum	50.000000	50.000000	degree
+hydrophobic_PiPiStacked_GammaAngleMaximum	35.000000	35.000000	degree
+hydrophobic_PiAmideStacked_ThetaAngleMaximum	40.000000	40.000000	degree
+hydrophobic_PiAmideStacked_GammaAngleMaximum	20.000000	20.000000	degree
+hydrophobic_PiPiTShaped_ThetaAngleMaximum	30.000000	30.000000	degree
+hydrophobic_PiPiTShaped_GammaAngleMinimum	55.000000	55.000000	degree
+hydrophobic_Alkyl_CenterDistanceMaximum	5.500000	5.500000	angstrom
+hydrophobic_Alkyl_SurfaceAreaScaleFactor	1.000000	1.000000	scale
+sulfurBond_SX_FractionVdwDistanceMaximum	100.000000	100.000000	percent
+sulfurBond_SX_ThetaAngleMaximum	90.000000	90.000000	degree
+sulfurBond_SX_DeviationAngleMaximum	30.000000	30.000000	degree
+
+# Expostos por Mdm::NonbondMonitor::AllNonbondTypes()
+nonbond_type
+nonInteracting
+unfavorableVdwBumpType
+saltBridgeType
+attractiveChargeType
+waterBridgeHBondType
+waterHBondType
+conventionalHBondType
+carbonHBondType
+metalAcceptorType
+halogenClBrIType
+halogenFluorineType
+sulfurType
+unfavorablePositivePositiveType
+unfavorableNegativeNegativeType
+unfavorableDonorDonorType
+unfavorableAcceptorAcceptorType
+unfavorableMetalDonorType
+piCationType
+piAnionType
+piDonorType
+piSigmaType
+piSulfurType
+piLonePairType
+piPiStackedType
+piPiTShapedType
+piAmideType
+alkylType
+piAlkylType

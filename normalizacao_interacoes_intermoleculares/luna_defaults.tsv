@@ -1,0 +1,59 @@
+section	parameter	value	unit
+Hydrogen bond	max_da_dist_hb_inter	3.9	angstrom
+Hydrogen bond	max_ha_dist_hb_inter	2.8	angstrom
+Hydrogen bond	min_dha_ang_hb_inter	90	degree
+Hydrogen bond	min_har_ang_hb_inter	90	degree
+Hydrogen bond	min_dar_ang_hb_inter	90	degree
+Weak hydrogen bond	max_da_dist_whb_inter	4	angstrom
+Weak hydrogen bond	max_ha_dist_whb_inter	3	angstrom
+Weak hydrogen bond	min_dha_ang_whb_inter	110	degree
+Weak hydrogen bond	min_har_ang_whb_inter	90	degree
+Weak hydrogen bond	min_dar_ang_whb_inter	90	degree
+Weak hydrogen bond	max_dc_dist_whb_inter	4.5	angstrom
+Weak hydrogen bond	max_hc_dist_whb_inter	3.5	angstrom
+Weak hydrogen bond	min_dhc_ang_whb_inter	120	degree
+Weak hydrogen bond	max_disp_ang_whb_inter	40	degree
+Ionic interaction	max_dist_repuls_inter	6	angstrom
+Ionic interaction	max_dist_attract_inter	6	angstrom
+Aromatic stacking	max_cc_dist_pi_pi_inter	6	angstrom
+Aromatic stacking	min_dihed_ang_slope_pi_pi_inter	30	degree
+Aromatic stacking	max_dihed_ang_slope_pi_pi_inter	60	degree
+Aromatic stacking	min_disp_ang_offset_pi_pi_inter	30	degree
+Aromatic stacking	max_disp_ang_offset_pi_pi_inter	60	degree
+Amide-aromatic stacking	max_cc_dist_amide_pi_inter	4.5	angstrom
+Amide-aromatic stacking	max_dihed_ang_amide_pi_inter	30	degree
+Amide-aromatic stacking	max_disp_ang_pi_pi_inter	30	degree
+Hydrophobic interaction	max_dist_hydrop_inter	4.5	angstrom
+Hydrophobic interaction	min_surf_size	1	atom
+Hydrophobic interaction	min_inter_atom_in_surf	1	atom
+Cation-pi interaction	max_dist_cation_pi_inter	6	angstrom
+Halogen bond	max_xa_dist_xbond_inter	4	angstrom
+Halogen bond	max_xc_dist_xbond_inter	4.5	angstrom
+Halogen bond	min_cxa_ang_xbond_inter	120	degree
+Halogen bond	min_xar_ang_xbond_inter	80	degree
+Halogen bond	max_disp_ang_xbond_inter	60	degree
+Chalcogen bond	max_ya_dist_ybond_inter	4	angstrom
+Chalcogen bond	max_yc_dist_ybond_inter	4.5	angstrom
+Chalcogen bond	min_rya_ang_ybond_inter	120	degree
+Chalcogen bond	min_yan_ang_ybond_inter	80	degree
+Chalcogen bond	max_disp_ang_ybond_inter	60	degree
+Orthogonal multipolar interaction	max_ne_dist_multipolar_inter	4	angstrom
+Orthogonal multipolar interaction	min_ney_ang_multipolar_inter	70	degree
+Orthogonal multipolar interaction	max_ney_ang_multipolar_inter	110	degree
+Orthogonal multipolar interaction	max_disp_ang_multipolar_inter	40	degree
+Orthogonal multipolar interaction	min_an_ey_ang_ortho_multipolar_inter	70	degree
+Orthogonal multipolar interaction	max_an_ey_ang_ortho_multipolar_inter	110	degree
+Orthogonal multipolar interaction	max_an_ey_ang_para_multipolar_inter	25	degree
+Orthogonal multipolar interaction	min_an_ey_ang_antipara_multipolar_inter	155	degree
+Ion-multipole interaction	max_id_dist_ion_multipole_inter	4.5	angstrom
+Ion-multipole interaction	min_idy_ang_ion_multipole_inter	60	degree
+Ion-multipole interaction	max_disp_ang_ion_multipole_inter	40	degree
+Proximal interaction	max_dist_proximal	6	angstrom
+Proximal interaction	min_dist_proximal	2	angstrom
+Van der Waals interaction	vdw_tolerance	0.1	fraction
+Van der Waals clash	vdw_clash_tolerance	0.6	fraction
+Metal complex	max_ma_dist_metal_coord	2.8	angstrom
+Bond separation	min_bond_separation	3	bond
+Bond separation	min_bond_separation_for_clash	4	bond
+Boundary cutoff	bsite_cutoff	6.2	angstrom
+Boundary cutoff	cache_cutoff	10	angstrom

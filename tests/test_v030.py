@@ -331,6 +331,6 @@ def test_run_captures_cutoffs_without_mutating_global_state(fixture_path):
 
     result = br.run([fixture_path("minimal_complex.pdb")], hbond_preset="dsv")
 
-    assert dict(result.parameters.cutoffs)["hbond_dist"] == 4.1
-    assert dict(result.parameters.cutoffs)["hbond_h_a_dist"] == 3.1
+    assert dict(result.parameters.cutoffs)["hbond_dist"] == 3.4
+    assert dict(result.parameters.cutoffs)["hbond_h_a_required"] == 0.0
     assert dict(CUTOFFS) == original

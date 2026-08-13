@@ -126,6 +126,17 @@ def test_project_round_trip_preserves_settings_hashes_and_methods(tmp_path):
     assert loaded.heatmap_top_n == 80
 
 
+def test_project_round_trip_preserves_conservative_hybrid_profile(tmp_path):
+    source = tmp_path / "frames.pdb"
+    source.write_text("MODEL 1\nENDMDL\n", encoding="utf-8")
+    project = replace(_project(source), hbond_preset="luna_dsv")
+
+    save_project(project, tmp_path / "hybrid.docklens")
+    loaded = load_project(tmp_path / "hybrid.docklens")
+
+    assert loaded.hbond_preset == "luna_dsv"
+
+
 def test_project_detects_missing_or_changed_sources(tmp_path):
     source = tmp_path / "frames.pdb"
     source.write_text("original", encoding="utf-8")

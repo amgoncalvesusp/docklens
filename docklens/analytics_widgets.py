@@ -1105,6 +1105,51 @@ class AnalyticsWorkspace(QtCore.QObject):
             return self.compare_panel.artifact
         return None
 
+    def exportable_artifacts(self):
+        """Return each unique chart generated for the current analysis state."""
+        panels = [
+            ("residue-profile", self.residue_panel),
+            ("interaction-heatmap", self.interaction_heatmap_panel),
+            ("interaction-fingerprint", self.fingerprint_panel),
+            ("interaction-similarity", self.similarity_panel),
+            ("state-population", self.state_population_panel),
+            ("state-timeline", self.state_timeline_panel),
+        ]
+        if self._mode == "md":
+            panels.append(("state-transitions", self.transition_panel))
+        if (
+            self.uncertainty_panel.artifact is not None
+            and not self.uncertainty_panel.artifact.data.empty
+        ):
+            panels.append(("state-confidence", self.uncertainty_panel))
+        if self._comparison is not None:
+            panels.append(("system-comparison", self.compare_panel))
+            roles_allow_retention = (
+                self.system_a_role.currentData() == "docking"
+                and self.system_b_role.currentData() == "md"
+            )
+            if (
+                roles_allow_retention
+                and self.retention_panel.artifact is not None
+                and not self.retention_panel.artifact.data.empty
+            ):
+                panels.append(("docking-md-retention", self.retention_panel))
+            if (
+                not self.compare_uncertainty_panel.isHidden()
+                and self._mode == "md"
+                and self.compare_analysis_combo.currentData() == "difference"
+                and self.compare_uncertainty_panel.artifact is not None
+                and not self.compare_uncertainty_panel.artifact.data.empty
+            ):
+                panels.append(
+                    ("comparison-confidence", self.compare_uncertainty_panel)
+                )
+        return {
+            name: panel.artifact
+            for name, panel in panels
+            if panel.artifact is not None
+        }
+
     def dispose(self):
         """Release every native Matplotlib canvas before Qt application exit."""
         self._tasks.wait_for_done()

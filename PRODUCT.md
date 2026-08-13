@@ -44,19 +44,21 @@ interaction persistence in one reproducible desktop workflow.
   denominators or individual poses/frames with binary contact presence.
 - Docking fingerprints can form pose families; ordered MD fingerprints can
   form interaction states with descriptive transitions and representatives.
-- Tables and figures are exported for audit, collaboration and publication.
+- Tables and figures are exported for audit, collaboration and publication,
+  including individual or complete 600 DPI LZW TIFF collections.
 - The companion PyMOL plug-in remains the molecular-viewing surface.
 
 ## Capabilities and Constraints
 
 - The complete and Discovery Studio-like analysis views must remain available.
-- Discovery Studio-like is an empirical, transparent approximation; the
-  product must not claim proprietary algorithm parity.
+- DSV-like uses the criteria exposed by the Discovery Studio 2024 monitor API;
+  the product must not claim parity with unpublished proprietary perception
+  logic.
 - Docking frequency and molecular-dynamics occupancy are distinct scientific
   concepts and must be labeled separately.
 - Raw atom-pair events remain available even when charts use consolidated
   residue/type/pose-or-frame counting units.
-- Existing CSV/XLSX results and v0.6.0 behavior must remain reproducible.
+- Existing CSV/XLSX results and legacy PLIP behavior must remain reproducible.
 - State clustering must disclose method, threshold, training sample and
   outliers.
 - MD intervals must preserve temporal dependence through block resampling,
@@ -71,8 +73,8 @@ interaction persistence in one reproducible desktop workflow.
 - Heatmap rows never group by display text. Aggregate rows retain zero-contact
   poses/frames in their own denominators; residue-only columns use logical
   presence rather than summing non-exclusive interaction channels.
-- Version 1.0.0 is developed on an isolated branch and does not replace the
-  current stable release until explicitly approved.
+- Version 1.1.0 is the current stable release and includes publication-quality
+  TIFF export alongside the validated scientific-profile contracts.
 
 ## Brand Commitments
 
@@ -85,7 +87,8 @@ interaction persistence in one reproducible desktop workflow.
 
 - Existing detector, result contracts, residue matrix and export pipeline in
   `docklens/`.
-- Discovery Studio-calibrated 2m5d corpus analysis documented in `README.md`.
+- Versioned PLIP, LUNA, DSV-like and conservative hybrid contracts documented
+  in `README.md` and `normalizacao_interacoes_intermoleculares/`.
 - Automated tests covering detection, export, profiles and desktop behavior.
 - No user study, accessibility audit or external visualization benchmark is
   currently recorded; future work must not fabricate these.

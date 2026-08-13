@@ -28,6 +28,7 @@ from .interaction_core import (
     VALID_TYPES,
     compute_interactions,
     cutoffs_for_preset,
+    default_types_for_profile,
     endpoint_name,
     endpoint_resid,
     endpoint_side,
@@ -168,9 +169,9 @@ def normalize_key_residues(items):
     return set(_normalize_key_residues(items))
 
 
-def _normalize_types(types):
+def _normalize_types(types, profile="plip"):
     if types is None:
-        return tuple(VALID_TYPES)
+        return tuple(default_types_for_profile(profile))
     if isinstance(types, str):
         types = types.replace(",", " ").split()
     normalized = []
@@ -189,7 +190,7 @@ def _normalize_types(types):
 def _normalize_preset(value):
     preset = str(value).strip().lower()
     if preset not in HBOND_PRESETS:
-        raise ValueError("Unknown H-bond preset: %s" % preset)
+        raise ValueError("Unknown scientific profile: %s" % preset)
     return preset
 
 
@@ -352,8 +353,9 @@ def run(
     confirm_fallback if True, fallback resolutions are run anyway (headless);
                      if False, they are collected in RunResult.pending instead.
     manual_overrides {source_file: set_of_ligand_serials} to force a split.
-    hbond_preset     'plip' (default, legacy) or 'dsv' (chemistry-aware,
-                     empirically calibrated against Discovery Studio data).
+    hbond_preset     Scientific profile: 'plip', 'luna', 'dsv' or the
+                     conservative cross-profile 'luna_dsv'. The name is kept
+                     for backward-compatible project and manifest schemas.
     """
     if (
         isinstance(max_file_size_bytes, bool)
@@ -361,8 +363,8 @@ def run(
         or max_file_size_bytes <= 0
     ):
         raise ValueError("max_file_size_bytes must be a positive integer")
-    requested_types = _normalize_types(types)
     hbond_preset = _normalize_preset(hbond_preset)
+    requested_types = _normalize_types(types, hbond_preset)
     key_set = normalize_key_residues(key_residues or [])
     manual_overrides = manual_overrides or {}
     details_out = []
@@ -653,8 +655,8 @@ def run_paired(
     if not ligand_poses:
         raise ValueError("Paired poses file contains no structural poses")
 
-    requested_types = _normalize_types(types)
     preset = _normalize_preset(hbond_preset)
+    requested_types = _normalize_types(types, preset)
     key_set = normalize_key_residues(key_residues or [])
     effective_cutoffs = cutoffs_for_preset(preset)
     receptor_atoms, receptor_waters = _split_waters(receptor_poses[0].atoms)

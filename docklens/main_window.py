@@ -5,8 +5,8 @@ Load a file / list / folder, resolve ligand vs. receptor, detect interactions an
 show two sortable/filterable tables (Summary, Detail) with distinct per-type
 colouring. Key residues are editable as free text AND pickable from a checkbox
 list of the detected protein residues; counts recompute without re-detection.
-An H-bond criteria preset switches between PLIP (default) and a chemistry-aware
-strict profile. Export to CSV / XLSX. Reset starts fresh.
+A scientific profile switches among legacy PLIP, LUNA, DSV-like and a
+conservative LUNA × DSV cross-profile. Export to CSV / XLSX. Reset starts fresh.
 """
 
 from __future__ import annotations
@@ -20,7 +20,11 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from . import __version__, batch_runner as br
 from . import export
 from .analysis_profiles import build_analysis_view
-from .figure_export import export_figure_bundle
+from .figure_export import (
+    PUBLICATION_TIFF_DPI,
+    export_figure_bundle,
+    export_tiff_collection,
+)
 from .integration_result import write_integration_result
 from .ligand_selection import ligand_groups
 from .main_window_ui import build_main_window_ui
@@ -352,22 +356,29 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
                 "Open Residues, Fingerprint or Compare before exporting a figure.",
             )
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+        path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Export publication figure bundle",
             artifact.kind,
-            "PNG image (*.png);;SVG vector (*.svg);;PDF vector (*.pdf)",
+            "PNG image (*.png);;SVG vector (*.svg);;PDF vector (*.pdf);;"
+            "TIFF publication image (*.tiff *.tif)",
         )
         if not path:
             return
         suffix = os.path.splitext(path)[1].lower().lstrip(".")
-        file_format = suffix if suffix in {"png", "svg", "pdf"} else "png"
+        if suffix in {"tif", "tiff"} or (
+            not suffix and selected_filter.startswith("TIFF")
+        ):
+            file_format = "tiff"
+        else:
+            file_format = suffix if suffix in {"png", "svg", "pdf"} else "png"
+        dpi = PUBLICATION_TIFF_DPI if file_format == "tiff" else 300
         try:
             outputs = export_figure_bundle(
                 artifact,
                 path,
                 formats=(file_format,),
-                dpi=300,
+                dpi=dpi,
                 extra_metadata=self._figure_export_metadata(artifact),
             )
         except Exception:  # noqa: BLE001 - contain library errors at UI boundary
@@ -384,6 +395,48 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             "Figure bundle exported",
             "Figure, source rows and reproducibility manifest were written:\n"
             + "\n".join(outputs),
+        )
+
+    def _export_all_tiff(self):
+        if not self._require_result():
+            return
+        artifacts = self.analytics_workspace.exportable_artifacts()
+        if not artifacts:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No figures available",
+                "Run an analysis before exporting publication figures.",
+            )
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Export all publication TIFF figures",
+        )
+        if not folder:
+            return
+        try:
+            outputs = export_tiff_collection(
+                artifacts,
+                folder,
+                dpi=PUBLICATION_TIFF_DPI,
+                metadata_factory=self._figure_export_metadata,
+            )
+        except Exception:  # noqa: BLE001 - contain library errors at UI boundary
+            LOGGER.exception("Publication TIFF collection export failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "TIFF export failed",
+                "DockLens could not write all publication TIFF files. "
+                "Verify the destination and available disk space, then try again.",
+            )
+            return
+        tiff_count = sum(path.lower().endswith(".tiff") for path in outputs)
+        QtWidgets.QMessageBox.information(
+            self,
+            "Publication TIFFs exported",
+            f"{tiff_count} chart(s) were exported at "
+            f"{PUBLICATION_TIFF_DPI} DPI with LZW compression.\n\n"
+            f"Destination: {folder}",
         )
 
     def _figure_export_metadata(self, artifact):

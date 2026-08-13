@@ -63,9 +63,12 @@ def load_manifest(path: Path | str) -> LaunchManifest:
     options = payload.get("options", {})
     if not isinstance(options, dict):
         raise ManifestError("options_invalid", "Manifest options must be an object.")
-    preset = options.get("hbond_preset", "plip")
+    raw_preset = options.get("hbond_preset", "plip")
+    if not isinstance(raw_preset, str):
+        raise ManifestError("preset_invalid", "The scientific profile is unsupported.")
+    preset = raw_preset.strip().lower()
     if preset not in HBOND_PRESETS:
-        raise ManifestError("preset_invalid", "The H-bond preset is unsupported.")
+        raise ManifestError("preset_invalid", "The scientific profile is unsupported.")
     key_values = options.get("key_residues", [])
     if not isinstance(key_values, list) or not all(isinstance(item, str) for item in key_values):
         raise ManifestError("key_residues_invalid", "Key residues must be a list of strings.")

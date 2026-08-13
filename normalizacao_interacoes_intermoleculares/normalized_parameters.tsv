@@ -1,0 +1,18 @@
+family	dsv_parameter	dsv_value	luna_parameter	luna_value	unit	comparison
+hydrogen_bond_strong	hydrogenBond_Strong_DonorAcceptor_DistanceMaximum	3.4	max_da_dist_hb_inter	3.9	angstrom	Different cutoff and different exposed geometry fields.
+hydrogen_bond_strong	hydrogenBond_DHA_AngleMinimum	90	min_dha_ang_hb_inter	90	degree	Equivalent lower D-H-A angle.
+hydrogen_bond_strong	hydrogenBond_HAY_AngleMinimum	90	min_har_ang_hb_inter	90	degree	Likely comparable donor/acceptor-neighbor angle; verify atom-role mapping.
+hydrogen_bond_weak	hydrogenBond_Weak_DonorAcceptor_DistanceMaximum	3.8	max_da_dist_whb_inter	4	angstrom	Different cutoff.
+salt_bridge	hydrogenBond_SaltBridge_DonorAcceptor_DistanceMaximum	4.0	max_dist_attract_inter	6	angstrom	Not a direct equivalence: DSV exposes salt-bridge H-bond criterion; LUNA ionic attraction is broader.
+cation_pi	electrostatic_CationPi_DistanceMaximum	5.0	max_dist_cation_pi_inter	6	angstrom	Different cutoff; DSV also exposes a 40-degree angle limit.
+cation_pi	electrostatic_CationPi_AngleMaximum	40			degree	No direct angle parameter found in LUNA config.
+pi_pi_stack	hydrophobic_PiPi_CenterDistanceMaximum	6.0	max_cc_dist_pi_pi_inter	6	angstrom	Same centroid cutoff.
+pi_pi_stack	hydrophobic_PiPiStacked_ThetaAngleMaximum	50	min_dihed_ang_slope_pi_pi_inter / max_dihed_ang_slope_pi_pi_inter	30 / 60	degree	Different angle representation; preserve native fields.
+pi_pi_t_shaped	hydrophobic_PiPiTShaped_ThetaAngleMaximum	30	min_disp_ang_offset_pi_pi_inter / max_disp_ang_offset_pi_pi_inter	30 / 60	degree	Not a one-to-one mapping; preserve classification geometry.
+amide_pi	hydrophobic_PiAmideStacked_ThetaAngleMaximum / GammaAngleMaximum	40 / 20	max_dihed_ang_amide_pi_inter / max_disp_ang_pi_pi_inter	30 / 30	degree	Different angle conventions.
+halogen_bond	halogenBond_F_DistanceMaximum	3.7	max_xa_dist_xbond_inter	4	angstrom	Different cutoff and DSV separates fluorine from Cl/Br/I.
+halogen_bond	halogenBond_CXB_AngleMinimum	120	min_cxa_ang_xbond_inter	120	degree	Comparable minimum approach angle.
+chalcogen_bond	sulfurBond_SX_FractionVdwDistanceMaximum	100	max_ya_dist_ybond_inter	4	mixed	Different metric: DSV uses VDW fraction; LUNA uses absolute distance.
+hydrophobic	hydrophobic_Alkyl_CenterDistanceMaximum	5.5	max_dist_hydrop_inter	4.5	angstrom	Different model and cutoff.
+metal_coordination			max_ma_dist_metal_coord	2.8	angstrom	DSV exposes metalAcceptorType but no metal distance criterion in the queried criterion list.
+vdw_clash	unfavorable_Bump_FractionVdwDistanceMinimum	0.7	vdw_clash_tolerance	0.6	fraction	Similar purpose, opposite-looking parameter semantics; do not compare numerically without reproducing the formulas.
