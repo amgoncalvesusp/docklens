@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from . import __version__
 from .analytics_widgets import AnalyticsWorkspace
 from .interaction_core import VALID_TYPES
 from .table_models import DataFrameModel, MultiFilterProxy
@@ -21,7 +22,7 @@ def _header(window, resource_path):
         )
     bar.addWidget(logo)
     titles = QtWidgets.QVBoxLayout()
-    title = QtWidgets.QLabel("DockLens 1.0")
+    title = QtWidgets.QLabel(f"DockLens {__version__}")
     title.setObjectName("title")
     title_palette = title.palette()
     title_palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor("#FFFFFF"))
@@ -53,17 +54,19 @@ def _header(window, resource_path):
 def _toolbar(window):
     layout = QtWidgets.QVBoxLayout()
     action_row = QtWidgets.QHBoxLayout()
-    open_files = QtWidgets.QPushButton("Open files")
+    protein_ligands = QtWidgets.QPushButton("Protein + ligands")
+    open_files = QtWidgets.QPushButton("Open complex files")
     open_folder = QtWidgets.QPushButton("Open folder")
     run = QtWidgets.QPushButton("Run detection")
     run.setObjectName("primary")
     window.run_detection_button = run
     reset = QtWidgets.QPushButton("Reset")
+    protein_ligands.clicked.connect(window._open_protein_ligands)
     open_files.clicked.connect(window._open_files)
     open_folder.clicked.connect(window._open_folder)
     run.clicked.connect(window._run)
     reset.clicked.connect(window._reset)
-    for button in (open_files, open_folder):
+    for button in (protein_ligands, open_files, open_folder):
         action_row.addWidget(button)
     action_row.addWidget(QtWidgets.QLabel("Chart labels:"))
     window.observation_label_combo = QtWidgets.QComboBox()

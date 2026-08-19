@@ -393,6 +393,10 @@ def input_qc_dataframe(result: RunResult) -> pd.DataFrame:
                 "ligand_atoms": record.ligand_atoms,
                 "water_atoms": record.water_atoms,
                 "warnings": "; ".join(record.warnings),
+                "input_mode": record.input_mode,
+                "receptor_source_file": record.receptor_source_file,
+                "receptor_source_path": record.receptor_source_path,
+                "group_id": record.group_id,
             }
         )
     return pd.DataFrame(
@@ -413,5 +417,9 @@ def input_qc_dataframe(result: RunResult) -> pd.DataFrame:
             "ligand_atoms",
             "water_atoms",
             "warnings",
+            "input_mode",
+            "receptor_source_file",
+            "receptor_source_path",
+            "group_id",
         ],
     )

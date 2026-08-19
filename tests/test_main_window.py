@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from PyQt5 import QtWidgets
 
 from docklens import batch_runner as br
+import docklens.main_window as main_window_module
+from docklens.input_plan import InputJob, InputPlan, run_shared_receptor_plan
 from docklens.main_window import MainWindow
 from docklens.results import Detail, Endpoint, Summary, make_result
 
@@ -234,3 +236,61 @@ def test_window_writes_vinalab_roundtrip_after_manifest_analysis(
     window._key_text_changed()
     assert len(captured) == 2
     assert captured[-1] == (manifest, window._result)
+
+
+def test_system_b_uses_the_same_shared_receptor_input_plan(
+    qtbot, fixture_path, monkeypatch
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._files = [fixture_path("minimal_complex.pdb")]
+    window._result = br.run(window._files)
+    window._refresh_tables()
+    plan = run_shared_receptor_plan(
+        fixture_path("minimal_complex.pdb"),
+        [fixture_path("two_poses_sol3.pdbqt")],
+    )
+
+    class FakeDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec_(self):
+            return QtWidgets.QDialog.Accepted
+
+        def plan(self):
+            return plan
+
+    monkeypatch.setattr(main_window_module, "InputPlanDialog", FakeDialog)
+
+    window._load_comparison()
+
+    assert window._comparison_input_plan == plan
+    assert window._comparison_result is not None
+    assert len(window._comparison_result.summaries) == 2
+    assert all(item.input_mode == "paired" for item in window._comparison_result.input_qc)
+
+
+def test_reset_clears_primary_and_comparison_input_plans(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    primary = InputPlan(
+        (InputJob("combined", str(tmp_path / "complex.pdb"), group_id="a"),)
+    )
+    comparison = InputPlan(
+        (
+            InputJob(
+                "paired",
+                str(tmp_path / "poses.pdbqt"),
+                str(tmp_path / "protein.pdb"),
+                "b",
+            ),
+        )
+    )
+    window._input_plan = primary
+    window._comparison_input_plan = comparison
+
+    window._reset()
+
+    assert window._input_plan is None
+    assert window._comparison_input_plan is None

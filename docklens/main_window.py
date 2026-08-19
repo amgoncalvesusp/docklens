@@ -26,6 +26,8 @@ from .figure_export import (
     export_tiff_collection,
 )
 from .integration_result import write_integration_result
+from .input_dialog import InputPlanDialog
+from .input_plan import InputJob, InputPlan, plan_from_paths
 from .ligand_selection import ligand_groups
 from .main_window_ui import build_main_window_ui
 from .project_controller import ProjectControllerMixin
@@ -125,9 +127,11 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self.setWindowIcon(QtGui.QIcon(resource_path("docklens_icon.png")))
         self.resize(1200, 800)
         self._files = []
+        self._input_plan = None
         self._result = None
         self._comparison_result = None
         self._comparison_files = []
+        self._comparison_input_plan = None
         self._launch_manifest = None
         self._project_stale = False
         self._syncing = False
@@ -153,22 +157,61 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def _open_files(self):
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "Select docking files",
+            "Select complex files",
             "",
             "Structures (*.mol2 *.pdb *.pdbqt);;All files (*)",
         )
         if files:
             self._files = list(files)
+            self._input_plan = plan_from_paths(files)
             self.analytics_workspace.clear_observation_series()
             self._clear_ligand_scopes()
             self._project_stale = False
             self.run_detection_button.setEnabled(True)
             self.status.showMessage("%d file(s) selected." % len(files))
 
+    def _open_protein_ligands(self):
+        dialog = InputPlanDialog(
+            self,
+            title="Select protein and ligand/docking files",
+            paired_only=True,
+        )
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        try:
+            plan = dialog.plan()
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Input plan", str(exc))
+            return
+        self._set_input_plan(plan)
+        self.status.showMessage(
+            "%d ligand/docking file(s) assigned to %d receptor group(s)."
+            % (
+                sum(job.kind == "paired" for job in plan.jobs),
+                len({job.group_id for job in plan.jobs}),
+            )
+        )
+
+    def _set_input_plan(self, plan, *, comparison=False):
+        if not isinstance(plan, InputPlan):
+            raise TypeError("plan must be an InputPlan")
+        if comparison:
+            self._comparison_input_plan = plan
+            self._comparison_files = list(plan.paths())
+            self._clear_ligand_scopes(comparison_only=True)
+        else:
+            self._input_plan = plan
+            self._files = list(plan.paths())
+            self.analytics_workspace.clear_observation_series()
+            self._clear_ligand_scopes()
+            self._project_stale = False
+            self.run_detection_button.setEnabled(True)
+
     def _open_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select folder")
         if folder:
             self._files = [folder]
+            self._input_plan = None
             self.analytics_workspace.clear_observation_series()
             self._clear_ligand_scopes()
             self._project_stale = False
@@ -307,17 +350,17 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             combo.blockSignals(False)
 
     def _load_comparison(self):
-        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self,
-            "Select System B structures",
-            "",
-            "Structures (*.mol2 *.pdb *.pdbqt);;All files (*)",
-        )
-        if not files:
+        dialog = InputPlanDialog(self, title="Select System B input plan")
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
         try:
-            comparison = br.run(
-                files,
+            plan = dialog.plan()
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "System B input plan", str(exc))
+            return
+        try:
+            comparison = br.run_plan(
+                plan,
                 key_residues=self.key_edit.text(),
                 hbond_preset=self._hbond_preset(),
             )
@@ -331,8 +374,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             )
             return
         self._comparison_result = comparison
-        self._comparison_files = list(files)
-        self._clear_ligand_scopes(comparison_only=True)
+        self._set_input_plan(plan, comparison=True)
         self.analytics_workspace.set_observation_series(
             None, comparison=True, refresh=False
         )
@@ -517,8 +559,9 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
                 hbond_preset=self._hbond_preset(),
             )
         else:
-            result = br.run(
-                self._files,
+            plan = self._input_plan or plan_from_paths(self._files)
+            result = br.run_plan(
+                plan,
                 key_residues=self.key_edit.text(),
                 hbond_preset=self._hbond_preset(),
             )
@@ -528,8 +571,8 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
                     "Run cancelled at ligand/receptor confirmation."
                 )
                 return
-            result = br.run(
-                self._files,
+            result = br.run_plan(
+                plan,
                 key_residues=self.key_edit.text(),
                 confirm_fallback=True,
                 hbond_preset=self._hbond_preset(),
@@ -543,7 +586,8 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self._populate_residue_list()
         self._refresh_tables()
         self.dataset_context.setText(
-            f"DockingHub · {len(self._result.summaries)} pose(s)"
+            f"{len(self._result.summaries)} pose(s) · "
+            f"{len(self._result.details)} interaction(s)"
         )
         errors = sum(record.status == "error" for record in result.input_qc)
         self.status.showMessage(
@@ -571,6 +615,17 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self._key_invalid_tokens = ()
         self.key_edit.setText(" ".join(manifest.key_residues))
         self._files = [str(manifest.receptor_path), str(manifest.poses_path)]
+        self._input_plan = InputPlan(
+            (
+                InputJob(
+                    "paired",
+                    str(manifest.poses_path),
+                    str(manifest.receptor_path),
+                    "dockhub",
+                    "paired-manifest",
+                ),
+            )
+        )
         self.analytics_workspace.clear_observation_series()
         self._clear_ligand_scopes()
         self._launch_manifest = manifest
@@ -778,8 +833,11 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def _reset(self):
         """Clear everything for a fresh analysis."""
         self._files = []
+        self._input_plan = None
         self._result = None
         self._comparison_result = None
+        self._comparison_files = []
+        self._comparison_input_plan = None
         self._launch_manifest = None
         self._syncing = True
         self._key_invalid_tokens = ()

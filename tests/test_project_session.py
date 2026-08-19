@@ -19,6 +19,7 @@ from docklens.project_session import (
     validate_project_inputs,
 )
 from docklens.observation_series import ObservationPoint, ObservationSeries
+from docklens.input_plan import InputJob, InputPlan
 from docklens.results import Detail, Endpoint, Summary, make_result
 
 
@@ -137,6 +138,39 @@ def test_project_round_trip_preserves_conservative_hybrid_profile(tmp_path):
     assert loaded.hbond_preset == "luna_dsv"
 
 
+def test_project_round_trip_preserves_explicit_input_plan(tmp_path):
+    receptor = tmp_path / "protein.pdb"
+    ligand = tmp_path / "poses.pdbqt"
+    receptor.write_text("ATOM\n", encoding="utf-8")
+    ligand.write_text("MODEL 1\nENDMDL\n", encoding="utf-8")
+    base = _project(ligand)
+    plan = InputPlan(
+        (
+            InputJob(
+                "paired",
+                source_path=str(ligand),
+                receptor_path=str(receptor),
+                group_id="receptor_1",
+            ),
+        )
+    )
+    project = replace(
+        base,
+        primary=replace(
+            base.primary,
+            inputs=(build_project_input(receptor), build_project_input(ligand)),
+            input_plan=plan,
+        ),
+    )
+
+    save_project(project, tmp_path / "planned.docklens")
+    loaded = load_project(tmp_path / "planned.docklens")
+
+    assert loaded.primary.input_plan == plan
+    assert "1 paired job(s)" in methods_summary(loaded)
+    assert "1 external receptor(s)" in methods_summary(loaded)
+
+
 def test_project_detects_missing_or_changed_sources(tmp_path):
     source = tmp_path / "frames.pdb"
     source.write_text("original", encoding="utf-8")
@@ -171,7 +205,7 @@ def test_project_loader_rejects_oversized_unknown_or_invalid_documents(tmp_path)
         load_project(malformed)
 
 
-@pytest.mark.parametrize("legacy_schema", ("1", "2"))
+@pytest.mark.parametrize("legacy_schema", ("1", "2", "3"))
 def test_legacy_project_migrates_to_current_chart_defaults(
     tmp_path, legacy_schema
 ):

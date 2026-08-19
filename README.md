@@ -17,6 +17,31 @@ conservative LUNA × DSV cross-profile. DockLens has **no PyMOL dependency**.
 
 **Inventor:** Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
 
+## Release 1.2.0
+
+This release unifies every loading route around an immutable input plan and
+adds the explicit external-protein workflow requested for multi-file docking.
+
+- **Protein + ligands** accepts one or more receptor groups. Each group can
+  contain multiple ligand/docking files; adding files appends them instead of
+  replacing the current selection. Complex files remain available as a
+  separate workflow, and System B uses the same plan format.
+- The generic runner isolates failures by source and dependent receptor group,
+  caches a shared receptor once, rejects receptors with zero or multiple models,
+  and records `input_mode`, receptor provenance, group, `source_id` and stable
+  `Sxxxxxx:Pxxxx:Rxxx` pose IDs in Input QC and exports.
+- MOL2 group resolution no longer places another ligand group into the
+  receptor. PDB/PDBQT HETATM ligands are separated by connectivity, while
+  combined PDBQT inputs preserve ATOM/HETATM classification.
+- `.docklens` projects use schema 4 with explicit plans and continue to read
+  schemas 1–3. The methods record now states the input interpretation.
+- Windows releases provide both `DockLens-windows-x86_64.exe` (portable) and
+  `DockLens-setup-windows-x86_64.exe` (installer). The installer creates the
+  application shortcuts and can be removed from Windows Apps.
+
+The publication TIFF export, four scientific profiles and unified color
+contract introduced in v1.1 remain part of v1.2.
+
 ## Release 1.1.0
 
 This release makes publication-ready figure export a first-class DockLens
@@ -56,12 +81,14 @@ Grab the executable for your OS from the [Releases](../../releases) page:
 
 | OS | File | How to run |
 |----|------|------------|
-| Windows | `DockLens-windows-x86_64.exe` | double-click |
+| Windows portable | `DockLens-windows-x86_64.exe` | double-click |
+| Windows installer | `DockLens-setup-windows-x86_64.exe` | run installer |
 | Linux | `DockLens-linux-x86_64` | `chmod +x DockLens-linux-x86_64 && ./DockLens-linux-x86_64` |
 
-Both are single-file bundles built with PyInstaller — no Python or dependencies
-to install. Builds are produced by GitHub Actions (`.github/workflows/build.yml`)
-on Windows and Ubuntu runners.
+The portable files are single-file bundles built with PyInstaller — no Python
+or dependencies to install. The Windows installer wraps the same executable
+and adds standard Windows shortcuts. Builds are produced by GitHub Actions
+(`.github/workflows/build.yml`) on Windows and Ubuntu runners.
 
 ## Run from source
 
@@ -78,6 +105,12 @@ Build your own executable:
 ```
 pip install pyinstaller
 pyinstaller --noconfirm --onefile --windowed --name DockLens run_docklens.py
+```
+
+To build the Windows installer locally, install Inno Setup 6 and run:
+
+```
+iscc /DAppVersion=1.2.0 /DSourceExe=dist\\DockLens.exe /DOutputDir=dist installer\\DockLens.iss
 ```
 
 ## DockingHub integration
@@ -194,7 +227,9 @@ global profile selector and are applied consistently to charts and tables.
 
 ## Using the app
 
-1. **Open file(s)** or **Open folder** (recursive scan of `.mol2/.pdb/.pdbqt`).
+1. Choose **Protein + ligands** for one or more external receptor groups, or
+   use **Open complex files** / **Open folder** for combined structures.
+   Reopening the protein/ligand dialog appends files within each group.
 2. (optional) set key residues — type them (`SER70; LYS73; GLU166`) **or** tick
    them from the checkbox list of the detected protein residues. Spaces,
    commas, semicolons and line breaks are accepted. DockLens reports invalid,

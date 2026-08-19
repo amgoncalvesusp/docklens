@@ -8,6 +8,7 @@ from pathlib import Path
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from . import __version__, batch_runner as br
+from .input_plan import InputPlan, plan_from_paths
 from .project_session import (
     ProjectDataset,
     ProjectState,
@@ -26,7 +27,9 @@ _WORKSPACES = ("residues", "fingerprint", "compare", "tables")
 class ProjectControllerMixin:
     """Add transactional project save/load behavior to ``MainWindow``."""
 
-    def _project_source_files(self, paths):
+    def _project_source_files(self, paths, input_plan: InputPlan | None = None):
+        if input_plan is not None:
+            paths = input_plan.paths()
         suffixes = {".mol2", ".pdb", ".pdbqt"}
         resolved = []
         for value in paths:
@@ -48,6 +51,10 @@ class ProjectControllerMixin:
             )
         )
 
+    @staticmethod
+    def _fallback_plan(paths):
+        return plan_from_paths(paths) if paths else None
+
     def _project_state(self):
         active_index = self.workspace_stack.currentIndex()
         active = (
@@ -60,9 +67,10 @@ class ProjectControllerMixin:
             label="System A",
             mode=self.mode_combo.currentData() or "docking",
             time_step_ns=workspace.time_step_spin.value(),
-            inputs=self._project_source_files(self._files),
+            inputs=self._project_source_files(self._files, self._input_plan),
             result=self._result,
             observation_series=workspace._series,
+            input_plan=self._input_plan or self._fallback_plan(self._files),
         )
         comparison = None
         if self._comparison_result is not None:
@@ -74,9 +82,15 @@ class ProjectControllerMixin:
                     or "docking"
                 ),
                 time_step_ns=workspace.time_step_spin.value(),
-                inputs=self._project_source_files(self._comparison_files),
+                inputs=self._project_source_files(
+                    self._comparison_files, self._comparison_input_plan
+                ),
                 result=self._comparison_result,
                 observation_series=workspace._comparison_series,
+                input_plan=(
+                    self._comparison_input_plan
+                    or self._fallback_plan(self._comparison_files)
+                ),
             )
         return ProjectState(
             app_version=__version__,
@@ -207,6 +221,7 @@ class ProjectControllerMixin:
             for control in controls:
                 control.blockSignals(False)
         self._files = [item.path for item in project.primary.inputs]
+        self._input_plan = project.primary.input_plan or self._fallback_plan(self._files)
         self._result = project.primary.result
         self._comparison_result = (
             project.comparison.result
@@ -217,6 +232,12 @@ class ProjectControllerMixin:
             [item.path for item in project.comparison.inputs]
             if project.comparison is not None
             else []
+        )
+        self._comparison_input_plan = (
+            project.comparison.input_plan
+            if project.comparison is not None
+            and project.comparison.input_plan is not None
+            else self._fallback_plan(self._comparison_files)
         )
         self.key_edit.setText(" ".join(project.key_residues))
         selected_types = set(project.selected_types)

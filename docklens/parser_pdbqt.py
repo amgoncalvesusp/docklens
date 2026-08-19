@@ -70,6 +70,7 @@ def _element_from_adtype(adtype, name):
 
 
 def _parse_atom_line(line, idx):
+    record = line[0:6].strip()
     serial = int(line[6:11]) if line[6:11].strip() else idx + 1
     name = line[12:16].strip()
     resn = line[17:20].strip()
@@ -80,7 +81,7 @@ def _parse_atom_line(line, idx):
     z = float(line[46:54])
     adtype = line[77:79].strip() if len(line) >= 79 else line[76:].strip()
     elem = _element_from_adtype(adtype, name)
-    return Atom(
+    atom = Atom(
         idx=idx,
         elem=elem,
         name=name,
@@ -91,16 +92,17 @@ def _parse_atom_line(line, idx):
         fcharge=0,  # pdbqt stores partial (Gasteiger) charges only
         serial=serial,
     )
+    return atom, record == "HETATM"
 
 
-def _finish_pose(atoms, atom_by_serial, source_file, pose_index, score):
+def _finish_pose(atoms, atom_by_serial, is_hetatm, source_file, pose_index, score):
     infer_bonds(atoms)
     return ParsedPose(
         atoms=atoms,
         atom_by_serial=atom_by_serial,
         fmt="pdbqt",
         source_file=source_file,
-        is_hetatm={a.serial: True for a in atoms},  # a docked ligand is all-HETATM
+        is_hetatm=is_hetatm,
         pose_index=pose_index,
         score=score,
         sol=parse_sol(source_file),
@@ -110,23 +112,28 @@ def _finish_pose(atoms, atom_by_serial, source_file, pose_index, score):
 def parse_pdbqt(path):
     """Parse a .pdbqt file into a list of ParsedPose (one per MODEL, or one)."""
     poses = []
-    atoms, atom_by_serial = [], {}
+    atoms, atom_by_serial, is_hetatm = [], {}, {}
     idx = 0
     score = None
 
     def flush():
-        nonlocal atoms, atom_by_serial, idx, score
+        nonlocal atoms, atom_by_serial, is_hetatm, idx, score
         if atoms:
-            poses.append(_finish_pose(atoms, atom_by_serial, path, len(poses), score))
-        atoms, atom_by_serial, idx, score = [], {}, 0, None
+            poses.append(
+                _finish_pose(
+                    atoms, atom_by_serial, is_hetatm, path, len(poses), score
+                )
+            )
+        atoms, atom_by_serial, is_hetatm, idx, score = [], {}, {}, 0, None
 
     with open(path, "r", errors="replace") as fh:
         for line in fh:
             rec = line[0:6].strip()
             if rec in ("ATOM", "HETATM"):
-                atom = _parse_atom_line(line, idx)
+                atom, het = _parse_atom_line(line, idx)
                 atoms.append(atom)
                 atom_by_serial[atom.serial] = atom
+                is_hetatm[atom.serial] = het
                 idx += 1
             elif rec == "ENDMDL":
                 flush()

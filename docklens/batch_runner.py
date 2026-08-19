@@ -34,6 +34,7 @@ from .interaction_core import (
     endpoint_side,
 )
 from . import __version__
+from .input_plan import InputJob, InputPlan, run_shared_receptor_plan
 from .parser_mol2 import parse_mol2
 from .parser_pdb import parse_pdb
 from .parser_pdbqt import parse_pdbqt
@@ -337,8 +338,212 @@ def _summarize(
     )
 
 
-def run(
-    paths,
+def _plan_from_gathered_inputs(paths):
+    candidates = _gather_inputs(paths)
+    return InputPlan(
+        InputJob(
+            kind="combined",
+            source_path=candidate.path,
+            group_id="combined_%d" % index,
+            input_status=candidate.status,
+            input_code=candidate.code,
+            input_message=candidate.message,
+        )
+        for index, candidate in enumerate(candidates, 1)
+    )
+
+
+def _validate_plan_size(max_file_size_bytes):
+    if (
+        isinstance(max_file_size_bytes, bool)
+        or not isinstance(max_file_size_bytes, int)
+        or max_file_size_bytes <= 0
+    ):
+        raise ValueError("max_file_size_bytes must be a positive integer")
+
+
+def _parameters(types, key_set, preset):
+    effective_cutoffs = cutoffs_for_preset(preset)
+    return AnalysisParameters(
+        app_version=__version__,
+        started_at=datetime.now(timezone.utc).isoformat(),
+        hbond_preset=preset,
+        cutoffs=tuple(
+            sorted((key, float(value)) for key, value in effective_cutoffs.items())
+        ),
+        interaction_types=types,
+        key_residues=tuple(sorted(key_set)),
+    )
+
+
+def _qc_common(job, source_id, path, fmt, **extra):
+    return dict(
+        source_id=source_id,
+        source_file=os.path.basename(path),
+        source_path=os.path.abspath(path),
+        format=fmt,
+        input_mode=job.kind,
+        receptor_source_file=job.receptor_source_file,
+        receptor_source_path=job.receptor_path or "",
+        group_id=job.group_id,
+        **extra,
+    )
+
+
+def _source_error(job, source_id, max_file_size_bytes):
+    path = job.source_path
+    fmt = os.path.splitext(path)[1].lstrip(".").lower()
+    common = _qc_common(job, source_id, path, fmt)
+    if job.input_code:
+        return InputQC(
+            **common,
+            status=job.input_status,
+            code=job.input_code,
+            message=_safe_qc_text(job.input_message),
+        )
+    if not os.path.exists(path):
+        return InputQC(
+            **common,
+            status="error",
+            code="missing_input",
+            message="Input path does not exist.",
+        )
+    if not os.path.isfile(path) or not path.lower().endswith(SUPPORTED_EXT):
+        return InputQC(
+            **common,
+            status="error",
+            code="unsupported_input",
+            message="Input is not a supported MOL2, PDB, or PDBQT file.",
+        )
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        return InputQC(
+            **common,
+            status="error",
+            code="file_stat_error",
+            message=_safe_exception_message("Could not inspect input file", exc),
+        )
+    if size > max_file_size_bytes:
+        return InputQC(
+            **common,
+            status="error",
+            code="file_too_large",
+            message="Input exceeds the configured size limit (%d bytes)."
+            % max_file_size_bytes,
+        )
+    return None
+
+
+def _load_receptor(job, max_file_size_bytes, cache):
+    path = job.receptor_path
+    key = os.path.normcase(path or "")
+    if key in cache:
+        return cache[key]
+    if not path or not os.path.isfile(path) or not path.lower().endswith(SUPPORTED_EXT):
+        value = (
+            None,
+            None,
+            "receptor_missing",
+            "Receptor is not a supported structure file.",
+        )
+        cache[key] = value
+        return value
+    try:
+        if os.path.getsize(path) > max_file_size_bytes:
+            raise OverflowError
+        poses = parse_file(path)
+        if not poses:
+            value = (
+                None,
+                None,
+                "receptor_no_models",
+                "Receptor contains no structural model.",
+            )
+        elif len(poses) != 1:
+            value = (
+                None,
+                None,
+                "receptor_multiple_models",
+                "Paired receptor must contain exactly one structural model.",
+            )
+        else:
+            atoms, waters = _split_waters(poses[0].atoms)
+            value = (atoms, waters, "", "")
+    except OverflowError:
+        value = (
+            None,
+            None,
+            "receptor_file_too_large",
+            "Receptor exceeds the configured size limit (%d bytes)."
+            % max_file_size_bytes,
+        )
+    except Exception as exc:  # noqa: BLE001 - isolate dependent jobs
+        value = (
+            None,
+            None,
+            "receptor_parse_error",
+            _safe_exception_message("Could not parse receptor", exc),
+        )
+    cache[key] = value
+    return value
+
+
+def _run_resolution(
+    *,
+    pose,
+    resolution,
+    path,
+    source_id,
+    pose_id,
+    pose_no,
+    key_set,
+    requested_types,
+    effective_cutoffs,
+    hbond_preset,
+):
+    set_sides(resolution)
+    interactions = compute_interactions(
+        resolution.receptor_atoms,
+        resolution.ligand_atoms,
+        resolution.waters,
+        requested_types,
+        cutoffs=effective_cutoffs,
+        chemistry_profile=hbond_preset,
+    )
+    details = [
+        _detail_from_interaction(
+            item,
+            resolution.ligand_id,
+            path,
+            key_set,
+            source_id=source_id,
+            pose_id=pose_id,
+            interaction_index=index,
+            pose_no=pose_no,
+            sol=pose.sol,
+            score=pose.score,
+            resolution_method=resolution.method,
+        )
+        for index, item in enumerate(interactions, 1)
+    ]
+    summary = _summarize(
+        resolution.ligand_id,
+        path,
+        pose.sol,
+        pose_no,
+        pose.score,
+        details,
+        key_set,
+        source_id=source_id,
+        pose_id=pose_id,
+        resolution_method=resolution.method,
+    )
+    return summary, details
+
+
+def run_plan(
+    input_plan,
     types=None,
     key_residues=None,
     confirm_fallback=False,
@@ -346,157 +551,146 @@ def run(
     hbond_preset="plip",
     max_file_size_bytes=DEFAULT_MAX_FILE_SIZE_BYTES,
 ):
-    """Run detection over the given inputs.
+    """Run all jobs in one immutable plan through the generic core."""
 
-    types            list of interaction types (default: all).
-    key_residues     iterable / string of key residue tags.
-    confirm_fallback if True, fallback resolutions are run anyway (headless);
-                     if False, they are collected in RunResult.pending instead.
-    manual_overrides {source_file: set_of_ligand_serials} to force a split.
-    hbond_preset     Scientific profile: 'plip', 'luna', 'dsv' or the
-                     conservative cross-profile 'luna_dsv'. The name is kept
-                     for backward-compatible project and manifest schemas.
-    """
-    if (
-        isinstance(max_file_size_bytes, bool)
-        or not isinstance(max_file_size_bytes, int)
-        or max_file_size_bytes <= 0
-    ):
-        raise ValueError("max_file_size_bytes must be a positive integer")
-    hbond_preset = _normalize_preset(hbond_preset)
-    requested_types = _normalize_types(types, hbond_preset)
+    if not isinstance(input_plan, InputPlan):
+        raise TypeError("input_plan must be an InputPlan")
+    _validate_plan_size(max_file_size_bytes)
+    preset = _normalize_preset(hbond_preset)
+    requested_types = _normalize_types(types, preset)
     key_set = normalize_key_residues(key_residues or [])
     manual_overrides = manual_overrides or {}
-    details_out = []
-    summaries_out = []
-    pending_out = []
-    qc_out = []
+    effective_cutoffs = cutoffs_for_preset(preset)
+    details_out, summaries_out, pending_out, qc_out = [], [], [], []
     receptor_residues = set()
-    effective_cutoffs = cutoffs_for_preset(hbond_preset)
-    parameters = AnalysisParameters(
-        app_version=__version__,
-        started_at=datetime.now(timezone.utc).isoformat(),
-        hbond_preset=hbond_preset,
-        cutoffs=tuple(
-            sorted((key, float(value)) for key, value in effective_cutoffs.items())
-        ),
-        interaction_types=requested_types,
-        key_residues=tuple(sorted(key_set)),
-    )
+    receptor_cache = {}
+    parameters = _parameters(requested_types, key_set, preset)
 
-    for source_number, candidate in enumerate(_gather_inputs(paths), 1):
-        path = candidate.path
+    for source_number, job in enumerate(input_plan.jobs, 1):
         source_id = "S%06d" % source_number
-        stem = os.path.splitext(os.path.basename(path))[0]
+        path = job.source_path
         fmt = os.path.splitext(path)[1].lstrip(".").lower()
-        if candidate.code:
-            qc_out.append(
-                InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(path),
-                    source_path=path,
-                    status=candidate.status,
-                    code=candidate.code,
-                    message=candidate.message,
-                    format=fmt,
-                )
-            )
+        source_error = _source_error(job, source_id, max_file_size_bytes)
+        if source_error is not None:
+            qc_out.append(source_error)
             continue
-        try:
-            file_size = os.path.getsize(path)
-        except OSError as exc:
-            qc_out.append(
-                InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(path),
-                    source_path=path,
-                    status="error",
-                    code="file_stat_error",
-                    message=_safe_exception_message(
-                        "Could not inspect input file", exc
-                    ),
-                    format=fmt,
-                )
+
+        receptor_atoms = receptor_waters = None
+        if job.kind == "paired":
+            receptor_atoms, receptor_waters, code, message = _load_receptor(
+                job, max_file_size_bytes, receptor_cache
             )
-            continue
-        if file_size > max_file_size_bytes:
-            qc_out.append(
-                InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(path),
-                    source_path=path,
-                    status="error",
-                    code="file_too_large",
-                    message="Input exceeds the configured size limit (%d bytes)."
-                    % max_file_size_bytes,
-                    format=fmt,
+            if code:
+                qc_out.append(
+                    InputQC(
+                        **_qc_common(
+                            job,
+                            source_id,
+                            path,
+                            fmt,
+                            status="error",
+                            code=code,
+                            message=message,
+                        )
+                    )
                 )
-            )
-            continue
+                continue
+            receptor_residues.update(atom.res_tag() for atom in receptor_atoms)
+
         try:
             poses = parse_file(path)
-        except Exception as exc:  # noqa: BLE001 - report, keep going
+        except Exception as exc:  # noqa: BLE001 - isolate one source file
             qc_out.append(
                 InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(path),
-                    source_path=os.path.abspath(path),
-                    status="error",
-                    code="parse_error",
-                    message=_safe_exception_message("Could not parse input file", exc),
-                    format=fmt,
+                    **_qc_common(
+                        job,
+                        source_id,
+                        path,
+                        fmt,
+                        status="error",
+                        code="parse_error",
+                        message=_safe_exception_message("Could not parse input file", exc),
+                    )
                 )
             )
             continue
         if not poses:
             qc_out.append(
                 InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(path),
-                    source_path=os.path.abspath(path),
-                    status="warning",
-                    code="no_poses",
-                    message="No structural poses were found.",
-                    format=fmt,
+                    **_qc_common(
+                        job,
+                        source_id,
+                        path,
+                        fmt,
+                        status="warning",
+                        code="no_poses",
+                        message="No structural poses were found.",
+                    )
                 )
             )
             continue
 
+        stem = os.path.splitext(os.path.basename(path))[0]
         for pose in poses:
             pose_no = pose.pose_index + 1
+            pose_id_prefix = "%s:P%04d" % (source_id, pose_no)
             try:
-                if path in manual_overrides:
-                    resolutions = [resolve_manual(pose, manual_overrides[path])]
+                if job.kind == "paired":
+                    resolutions = [
+                        Resolution(
+                            receptor_atoms,
+                            list(pose.atoms),
+                            receptor_waters,
+                            "%s_pose_%04d" % (stem, pose_no),
+                            job.resolution_method or "paired-plan",
+                        )
+                    ]
                 else:
-                    resolutions = resolve(pose, import_stem=stem)
+                    override = manual_overrides.get(path)
+                    resolutions = (
+                        [resolve_manual(pose, override)]
+                        if override is not None
+                        else resolve(pose, import_stem=stem)
+                    )
             except Exception as exc:  # noqa: BLE001 - isolate malformed poses
                 qc_out.append(
                     InputQC(
-                        source_id=source_id,
-                        source_file=os.path.basename(path),
-                        source_path=path,
-                        pose_id="%s:P%04d:R000" % (source_id, pose_no),
-                        status="error",
-                        code="pose_error",
-                        message=_safe_exception_message("Could not process pose", exc),
-                        format=fmt,
-                        poses_found=len(poses),
+                        **_qc_common(
+                            job,
+                            source_id,
+                            path,
+                            fmt,
+                            pose_id=pose_id_prefix + ":R000",
+                            status="error",
+                            code="pose_error",
+                            message=_safe_exception_message("Could not process pose", exc),
+                            poses_found=len(poses),
+                        )
                     )
                 )
                 continue
 
-            for resolution_index, res in enumerate(resolutions, 1):
-                pose_id = "%s:P%04d:R%03d" % (
+            for resolution_index, resolution in enumerate(resolutions, 1):
+                pose_id = "%s:R%03d" % (pose_id_prefix, resolution_index)
+                common = _qc_common(
+                    job,
                     source_id,
-                    pose_no,
-                    resolution_index,
+                    path,
+                    fmt,
+                    pose_id=pose_id,
+                    poses_found=len(poses),
+                    resolution_method=resolution.method,
+                    receptor_atoms=len(resolution.receptor_atoms),
+                    ligand_atoms=len(resolution.ligand_atoms),
+                    water_atoms=len(resolution.waters),
+                    warnings=tuple(_safe_qc_text(item) for item in resolution.warnings),
                 )
-                if res.needs_confirmation and not confirm_fallback:
+                if resolution.needs_confirmation and not confirm_fallback:
                     pending_out.append(
                         Pending(
                             pose,
-                            res,
-                            res.preview,
+                            resolution,
+                            resolution.preview,
                             path,
                             source_id,
                             pose_id,
@@ -505,120 +699,58 @@ def run(
                     )
                     qc_out.append(
                         InputQC(
-                            source_id=source_id,
-                            source_file=os.path.basename(path),
-                            source_path=os.path.abspath(path),
-                            pose_id=pose_id,
+                            **common,
                             status="pending",
                             code="confirmation_required",
-                            message=_safe_qc_text(res.preview),
-                            format=fmt,
-                            poses_found=len(poses),
-                            resolution_method=res.method,
-                            receptor_atoms=len(res.receptor_atoms),
-                            ligand_atoms=len(res.ligand_atoms),
-                            water_atoms=len(res.waters),
-                            warnings=tuple(
-                                _safe_qc_text(item) for item in res.warnings
-                            ),
+                            message=_safe_qc_text(resolution.preview),
                         )
                     )
                     continue
-                if not res.ligand_atoms:
+                if not resolution.ligand_atoms:
                     qc_out.append(
                         InputQC(
-                            source_id=source_id,
-                            source_file=os.path.basename(path),
-                            source_path=os.path.abspath(path),
-                            pose_id=pose_id,
+                            **common,
                             status="warning",
                             code="no_ligand",
                             message="No ligand atoms were identified.",
-                            format=fmt,
-                            poses_found=len(poses),
-                            resolution_method=res.method,
-                            receptor_atoms=len(res.receptor_atoms),
-                            water_atoms=len(res.waters),
                         )
                     )
                     continue
                 try:
-                    set_sides(res)
-                    residue_tags = {a.res_tag() for a in res.receptor_atoms}
-                    inters = compute_interactions(
-                        res.receptor_atoms,
-                        res.ligand_atoms,
-                        res.waters,
-                        requested_types,
-                        cutoffs=effective_cutoffs,
-                        chemistry_profile=hbond_preset,
-                    )
-                    details = [
-                        _detail_from_interaction(
-                            it,
-                            res.ligand_id,
-                            path,
-                            key_set,
-                            source_id=source_id,
-                            pose_id=pose_id,
-                            interaction_index=index,
-                            pose_no=pose_no,
-                            sol=pose.sol,
-                            score=pose.score,
-                            resolution_method=res.method,
-                        )
-                        for index, it in enumerate(inters, 1)
-                    ]
-                    summ = _summarize(
-                        res.ligand_id,
-                        path,
-                        pose.sol,
-                        pose_no,
-                        pose.score,
-                        details,
-                        key_set,
+                    summary, details = _run_resolution(
+                        pose=pose,
+                        resolution=resolution,
+                        path=path,
                         source_id=source_id,
                         pose_id=pose_id,
-                        resolution_method=res.method,
+                        pose_no=pose_no,
+                        key_set=key_set,
+                        requested_types=requested_types,
+                        effective_cutoffs=effective_cutoffs,
+                        hbond_preset=preset,
                     )
                 except Exception as exc:  # noqa: BLE001 - isolate one resolution
                     qc_out.append(
                         InputQC(
-                            source_id=source_id,
-                            source_file=os.path.basename(path),
-                            source_path=path,
-                            pose_id=pose_id,
+                            **common,
                             status="error",
                             code="pose_error",
-                            message=_safe_exception_message(
-                                "Could not process pose", exc
-                            ),
-                            format=fmt,
-                            poses_found=len(poses),
-                            resolution_method=_safe_qc_text(getattr(res, "method", "")),
+                            message=_safe_exception_message("Could not process pose", exc),
                         )
                     )
                     continue
-                receptor_residues.update(residue_tags)
                 details_out.extend(details)
-                summaries_out.append(summ)
+                summaries_out.append(summary)
+                receptor_residues.update(
+                    atom.res_tag() for atom in resolution.receptor_atoms
+                )
                 qc_out.append(
                     InputQC(
-                        source_id=source_id,
-                        source_file=os.path.basename(path),
-                        source_path=os.path.abspath(path),
-                        pose_id=pose_id,
-                        status="warning" if res.warnings else "success",
-                        code="resolution_warning" if res.warnings else "",
-                        message=_safe_qc_text("; ".join(res.warnings)),
-                        format=fmt,
-                        poses_found=len(poses),
+                        **common,
+                        status="warning" if resolution.warnings else "success",
+                        code="resolution_warning" if resolution.warnings else "",
+                        message=_safe_qc_text("; ".join(resolution.warnings)),
                         poses_processed=1,
-                        resolution_method=res.method,
-                        receptor_atoms=len(res.receptor_atoms),
-                        ligand_atoms=len(res.ligand_atoms),
-                        water_atoms=len(res.waters),
-                        warnings=tuple(_safe_qc_text(item) for item in res.warnings),
                     )
                 )
 
@@ -633,6 +765,51 @@ def run(
     )
 
 
+def run(
+    paths,
+    types=None,
+    key_residues=None,
+    confirm_fallback=False,
+    manual_overrides=None,
+    hbond_preset="plip",
+    max_file_size_bytes=DEFAULT_MAX_FILE_SIZE_BYTES,
+):
+    """Backward-compatible wrapper that treats each input as combined."""
+
+    return run_plan(
+        _plan_from_gathered_inputs(paths),
+        types=types,
+        key_residues=key_residues,
+        confirm_fallback=confirm_fallback,
+        manual_overrides=manual_overrides,
+        hbond_preset=hbond_preset,
+        max_file_size_bytes=max_file_size_bytes,
+    )
+
+
+def run_shared_receptor(
+    receptor_path,
+    ligand_paths,
+    types=None,
+    key_residues=None,
+    confirm_fallback=False,
+    manual_overrides=None,
+    hbond_preset="plip",
+    max_file_size_bytes=DEFAULT_MAX_FILE_SIZE_BYTES,
+):
+    """Analyze multiple ligand/pose files against one cached receptor."""
+
+    return run_plan(
+        run_shared_receptor_plan(receptor_path, ligand_paths),
+        types=types,
+        key_residues=key_residues,
+        confirm_fallback=confirm_fallback,
+        manual_overrides=manual_overrides,
+        hbond_preset=hbond_preset,
+        max_file_size_bytes=max_file_size_bytes,
+    )
+
+
 def run_paired(
     receptor_path,
     poses_path,
@@ -641,139 +818,26 @@ def run_paired(
     hbond_preset="plip",
     max_file_size_bytes=DEFAULT_MAX_FILE_SIZE_BYTES,
 ):
-    """Detect interactions using an explicit receptor plus a multipose ligand file."""
+    """Compatibility wrapper for the DockingHub receptor/poses contract."""
+
     receptor_path, poses_path = _coerce_paths([receptor_path, poses_path])
-    for path in (receptor_path, poses_path):
-        if not os.path.isfile(path) or not path.lower().endswith(SUPPORTED_EXT):
-            raise ValueError("Paired input is not a supported structure file")
-        if os.path.getsize(path) > max_file_size_bytes:
-            raise ValueError("Paired input exceeds the configured size limit")
-    receptor_poses = parse_file(receptor_path)
-    ligand_poses = parse_file(poses_path)
-    if len(receptor_poses) != 1:
-        raise ValueError("Paired receptor must contain exactly one structural model")
-    if not ligand_poses:
-        raise ValueError("Paired poses file contains no structural poses")
-
-    preset = _normalize_preset(hbond_preset)
-    requested_types = _normalize_types(types, preset)
-    key_set = normalize_key_residues(key_residues or [])
-    effective_cutoffs = cutoffs_for_preset(preset)
-    receptor_atoms, receptor_waters = _split_waters(receptor_poses[0].atoms)
-    parameters = AnalysisParameters(
-        app_version=__version__,
-        started_at=datetime.now(timezone.utc).isoformat(),
-        hbond_preset=preset,
-        cutoffs=tuple(
-            sorted((key, float(value)) for key, value in effective_cutoffs.items())
-        ),
-        interaction_types=requested_types,
-        key_residues=tuple(sorted(key_set)),
-    )
-    details_out = []
-    summaries_out = []
-    qc_out = []
-    receptor_residues = set()
-    ligand_stem = os.path.splitext(os.path.basename(poses_path))[0]
-    source_id = "PAIR000001"
-
-    for pose in ligand_poses:
-        pose_no = pose.pose_index + 1
-        pose_id = "%s:P%04d" % (source_id, pose_no)
-        ligand_id = "%s_pose_%04d" % (ligand_stem, pose_no)
-        resolution = Resolution(
-            receptor_atoms,
-            pose.atoms,
-            receptor_waters,
-            ligand_id,
-            "paired-manifest",
+    plan = InputPlan(
+        (
+            InputJob(
+                kind="paired",
+                source_path=poses_path,
+                receptor_path=receptor_path,
+                group_id="dockhub",
+                resolution_method="paired-manifest",
+            ),
         )
-        try:
-            set_sides(resolution)
-            receptor_residues.update(atom.res_tag() for atom in receptor_atoms)
-            interactions = compute_interactions(
-                receptor_atoms,
-                pose.atoms,
-                receptor_waters,
-                requested_types,
-                cutoffs=effective_cutoffs,
-                chemistry_profile=preset,
-            )
-            details = [
-                _detail_from_interaction(
-                    interaction,
-                    ligand_id,
-                    poses_path,
-                    key_set,
-                    source_id=source_id,
-                    pose_id=pose_id,
-                    interaction_index=index,
-                    pose_no=pose_no,
-                    sol=pose.sol,
-                    score=pose.score,
-                    resolution_method="paired-manifest",
-                )
-                for index, interaction in enumerate(interactions, 1)
-            ]
-            summaries_out.append(
-                _summarize(
-                    ligand_id,
-                    poses_path,
-                    pose.sol,
-                    pose_no,
-                    pose.score,
-                    details,
-                    key_set,
-                    source_id=source_id,
-                    pose_id=pose_id,
-                    resolution_method="paired-manifest",
-                )
-            )
-            details_out.extend(details)
-            qc_out.append(
-                InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(poses_path),
-                    source_path=poses_path,
-                    pose_id=pose_id,
-                    status="success",
-                    format=pose.fmt,
-                    poses_found=len(ligand_poses),
-                    poses_processed=1,
-                    resolution_method="paired-manifest",
-                    receptor_atoms=len(receptor_atoms),
-                    ligand_atoms=len(pose.atoms),
-                    water_atoms=len(receptor_waters),
-                )
-            )
-        except Exception as exc:  # noqa: BLE001 - isolate one paired pose
-            qc_out.append(
-                InputQC(
-                    source_id=source_id,
-                    source_file=os.path.basename(poses_path),
-                    source_path=poses_path,
-                    pose_id=pose_id,
-                    status="error",
-                    code="pose_error",
-                    message=_safe_exception_message(
-                        "Could not process paired pose", exc
-                    ),
-                    format=pose.fmt,
-                    poses_found=len(ligand_poses),
-                    resolution_method="paired-manifest",
-                    receptor_atoms=len(receptor_atoms),
-                    ligand_atoms=len(pose.atoms),
-                    water_atoms=len(receptor_waters),
-                )
-            )
-
-    return make_result(
-        details=details_out,
-        summaries=summaries_out,
-        key_residues=key_set,
-        receptor_residues=receptor_residues,
-        input_qc=qc_out,
-        parameters=parameters,
+    )
+    return run_plan(
+        plan,
+        types=types,
+        key_residues=key_residues,
+        hbond_preset=hbond_preset,
+        max_file_size_bytes=max_file_size_bytes,
     )
 
 

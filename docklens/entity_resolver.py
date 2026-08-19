@@ -87,20 +87,21 @@ def _ligand_id_from_atoms(ligand_atoms, fallback):
 
 def _connected_components(atoms):
     """Return connected components (by bond graph) as lists of atoms."""
+    allowed = {id(atom) for atom in atoms}
     seen = set()
     comps = []
     for a in atoms:
-        if a.idx in seen:
+        if id(a) in seen:
             continue
         stack = [a]
         comp = []
-        seen.add(a.idx)
+        seen.add(id(a))
         while stack:
             cur = stack.pop()
             comp.append(cur)
             for nb in cur.neighbors:
-                if nb.idx not in seen:
-                    seen.add(nb.idx)
+                if id(nb) in allowed and id(nb) not in seen:
+                    seen.add(id(nb))
                     stack.append(nb)
         comps.append(comp)
     return comps
@@ -146,9 +147,12 @@ def resolve(pose, import_stem=None):
     group_ids = [sid for sid, t in pose.group_subst.items() if t == "GROUP"]
     if group_ids:
         out = []
+        all_group_atoms = {
+            id(a) for a in pose.atoms if a.subst_id in set(group_ids)
+        }
         for gid in group_ids:
             ligand = [a for a in pose.atoms if a.subst_id == gid]
-            receptor = [a for a in pose.atoms if a.subst_id != gid]
+            receptor = [a for a in pose.atoms if id(a) not in all_group_atoms]
             receptor, waters = _split_waters(receptor)
             lig_id = _ligand_id_from_group_info(
                 group_info.get(gid, ""), _ligand_id_from_atoms(ligand, fallback_id)
@@ -158,19 +162,32 @@ def resolve(pose, import_stem=None):
 
     # --- Priority 3: pdb/pdbqt HETATM ---
     if pose.is_hetatm:
-        ligand, receptor = [], []
+        ligand_candidates, receptor = [], []
         for a in pose.atoms:
             het = pose.is_hetatm.get(a.serial, False)
             is_water = a.resn.upper() in _WATER_RESN
             is_metal = a.elem in _METALS
             if het and not is_water and not is_metal:
-                ligand.append(a)
+                ligand_candidates.append(a)
             else:
                 receptor.append(a)
         receptor, waters = _split_waters(receptor)
-        if ligand:
-            lig_id = _ligand_id_from_atoms(ligand, fallback_id)
-            return [Resolution(receptor, ligand, waters, lig_id, "hetatm")]
+        if ligand_candidates:
+            components = _connected_components(ligand_candidates)
+            method = "hetatm" if len(components) == 1 else "hetatm-components"
+            return [
+                Resolution(
+                    receptor,
+                    component,
+                    waters,
+                    _ligand_id_from_atoms(
+                        component,
+                        "%s_%d" % (fallback_id, index),
+                    ),
+                    method,
+                )
+                for index, component in enumerate(components, 1)
+            ]
 
     # --- Priority 4: fallback (smallest component/chain) — needs confirmation ---
     non_water, waters = _split_waters(pose.atoms)

@@ -19,6 +19,7 @@ from typing import Any, Mapping
 import zipfile
 
 from .observation_series import ObservationPoint, ObservationSeries
+from .input_plan import InputJob, InputPlan
 from .ligand_selection import ligand_groups
 from .results import (
     AnalysisParameters,
@@ -29,8 +30,8 @@ from .results import (
     Summary,
 )
 
-PROJECT_SCHEMA_VERSION = "3"
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2", "3"})
+PROJECT_SCHEMA_VERSION = "4"
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2", "3", "4"})
 MAX_PROJECT_BYTES = 5 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 8
@@ -91,6 +92,7 @@ class ProjectDataset:
     inputs: tuple[ProjectInput, ...] = ()
     result: RunResult | None = None
     observation_series: ObservationSeries | None = None
+    input_plan: InputPlan | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in {"docking", "md"}:
@@ -101,6 +103,19 @@ class ProjectDataset:
                 raise ValueError("time_step_ns must be a positive finite number")
             object.__setattr__(self, "time_step_ns", value)
         object.__setattr__(self, "inputs", tuple(self.inputs))
+        if self.input_plan is not None and not isinstance(self.input_plan, InputPlan):
+            raise ValueError("input_plan must be an InputPlan or None")
+        if self.input_plan is not None:
+            declared = {
+                os.path.normcase(item.path) for item in self.inputs
+            }
+            missing = [
+                path
+                for path in self.input_plan.paths()
+                if os.path.normcase(path) not in declared
+            ]
+            if missing:
+                raise ValueError("input_plan contains an undeclared project input")
         if (
             self.observation_series is not None
             and self.observation_series.mode != self.mode
@@ -317,6 +332,7 @@ def methods_summary(project: ProjectState) -> str:
         "assumed independent.\n"
         "Key residues: {residues}\n"
         "Selected interaction types: {types}\n"
+        "Input plan: {input_plan}\n"
     ).format(
         version=project.app_version,
         profile=profile,
@@ -340,6 +356,22 @@ def methods_summary(project: ProjectState) -> str:
         confidence=100.0 * project.confidence_level,
         residues=", ".join(project.key_residues) or "none",
         types=", ".join(project.selected_types) or "all",
+        input_plan=_plan_summary(project.primary.input_plan),
+    )
+
+
+def _plan_summary(input_plan: InputPlan | None) -> str:
+    if input_plan is None:
+        return "legacy combined-file interpretation"
+    paired = sum(job.kind == "paired" for job in input_plan.jobs)
+    combined = sum(job.kind == "combined" for job in input_plan.jobs)
+    receptors = len(
+        {job.receptor_path for job in input_plan.jobs if job.receptor_path}
+    )
+    return "%d paired job(s), %d combined job(s), %d external receptor(s)" % (
+        paired,
+        combined,
+        receptors,
     )
 
 
@@ -671,6 +703,7 @@ def _dataset_to_payload(
             for item in dataset.inputs
         ],
         "result": result_reference,
+        "input_plan": _input_plan_to_payload(dataset.input_plan),
         "observation_series": (
             {
                 "mode": dataset.observation_series.mode,
@@ -765,7 +798,68 @@ def _dataset_from_payload(
             else None
         ),
         observation_series=observation_series,
+        input_plan=_input_plan_from_payload(payload.get("input_plan")),
     )
+
+
+def _input_plan_to_payload(input_plan: InputPlan | None):
+    if input_plan is None:
+        return None
+    return {
+        "jobs": [
+            {
+                "kind": job.kind,
+                "source_path": job.source_path,
+                "receptor_path": job.receptor_path,
+                "group_id": job.group_id,
+                "resolution_method": job.resolution_method,
+                "input_status": job.input_status,
+                "input_code": job.input_code,
+                "input_message": job.input_message,
+            }
+            for job in input_plan.jobs
+        ]
+    }
+
+
+def _input_plan_from_payload(payload):
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("input_plan must be an object")
+    jobs_payload = payload.get("jobs")
+    if not isinstance(jobs_payload, list):
+        raise ValueError("input_plan jobs must be a list")
+    allowed = {
+        "kind",
+        "source_path",
+        "receptor_path",
+        "group_id",
+        "resolution_method",
+        "input_status",
+        "input_code",
+        "input_message",
+    }
+    jobs = []
+    for item in jobs_payload:
+        if not isinstance(item, dict) or not set(item).issubset(allowed):
+            raise ValueError("invalid input_plan job")
+        receptor = item.get("receptor_path")
+        if receptor is not None and not isinstance(receptor, str):
+            raise ValueError("input_plan receptor_path must be text or null")
+        jobs.append(
+            InputJob(
+                kind=_text(item, "kind"),
+                source_path=_text(item, "source_path"),
+                receptor_path=receptor,
+                group_id=str(item.get("group_id", "")),
+                resolution_method=str(item.get("resolution_method", "")),
+                input_status=str(item.get("input_status", "success")),
+                input_code=str(item.get("input_code", "")),
+                input_message=str(item.get("input_message", "")),
+            )
+        )
+    return InputPlan(tuple(jobs))
 
 
 def _result_to_payload(result: RunResult) -> dict[str, Any]:

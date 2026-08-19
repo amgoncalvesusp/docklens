@@ -98,11 +98,18 @@ def _detail_payload(item) -> dict[str, object]:
 
 def _qc_payload(item) -> dict[str, object]:
     return {
+        "source_id": item.source_id,
+        "source_file": item.source_file,
+        "source_path": item.source_path,
         "pose_id": item.pose_id,
         "status": item.status,
         "code": item.code,
         "message": item.message,
         "format": item.format,
+        "input_mode": item.input_mode,
+        "group_id": item.group_id,
+        "receptor_source_file": item.receptor_source_file,
+        "receptor_source_path": item.receptor_source_path,
         "resolution_method": item.resolution_method,
         "receptor_atoms": item.receptor_atoms,
         "ligand_atoms": item.ligand_atoms,

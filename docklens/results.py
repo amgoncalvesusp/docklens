@@ -115,6 +115,10 @@ class InputQC:
     ligand_atoms: int = 0
     water_atoms: int = 0
     warnings: Tuple[str, ...] = ()
+    input_mode: str = "combined"
+    receptor_source_file: str = ""
+    receptor_source_path: str = ""
+    group_id: str = ""
 
 
 @dataclass(frozen=True)
