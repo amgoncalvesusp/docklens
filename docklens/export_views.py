@@ -15,10 +15,13 @@ from .results import ExportFilter, RunResult
 
 SUMMARY_BASE_COLS = [
     "ligand_id",
+    "source_pose_label",
+    "source_molecule_name",
     "source_file",
-    "sol",
     "pose",
     "docking_score",
+    "score_type",
+    "sol",
     "n_total_interactions",
     "n_key_residue_interactions",
     "distinct_key_residue_count",
@@ -27,10 +30,16 @@ SUMMARY_BASE_COLS = [
     "conventional_hbond_residue_count",
     "key_interaction_type_diversity",
 ]
-SUMMARY_META_COLS = ["source_path", "source_id", "pose_id", "resolution_method"]
+SUMMARY_META_COLS = ["pose_id", "source_path", "source_id", "resolution_method"]
 DETAIL_BASE_COLS = [
     "ligand_id",
+    "source_pose_label",
+    "source_molecule_name",
     "source_file",
+    "pose",
+    "pose_id",
+    "docking_score",
+    "score_type",
     "interaction_type",
     "subtype",
     "ligand_atom",
@@ -49,11 +58,8 @@ DETAIL_BASE_COLS = [
 ]
 DETAIL_META_COLS = [
     "source_id",
-    "pose_id",
     "interaction_id",
     "sol",
-    "pose",
-    "docking_score",
     "resolution_method",
     "source_path",
     "ligand_residue",
@@ -83,7 +89,13 @@ def _matches_text(detail, needle):
     if not needle:
         return True
     haystack = " ".join(
-        (detail.receptor_residue, detail.source_file, detail.ligand_id)
+        (
+            detail.receptor_residue,
+            detail.source_file,
+            detail.ligand_id,
+            detail.source_pose_label,
+            detail.source_molecule_name,
+        )
     ).lower()
     return needle in haystack
 
@@ -147,6 +159,9 @@ def summary_dataframe(result: RunResult) -> pd.DataFrame:
             "sol": summary.sol,
             "pose": summary.pose,
             "docking_score": summary.docking_score,
+            "source_pose_label": summary.source_pose_label,
+            "source_molecule_name": summary.source_molecule_name,
+            "score_type": summary.score_type,
             "n_total_interactions": summary.n_total_interactions,
             "n_key_residue_interactions": summary.n_key_residue_interactions,
             "distinct_key_residue_count": metrics.distinct_key_residue_count,
@@ -173,13 +188,17 @@ def summary_dataframe(result: RunResult) -> pd.DataFrame:
 
 KEY_RESIDUE_COVERAGE_COLS = [
     "ligand_id",
+    "source_pose_label",
+    "source_molecule_name",
     "source_file",
-    "source_path",
-    "source_id",
-    "pose_id",
-    "sol",
     "pose",
+    "pose_id",
     "docking_score",
+    "score_type",
+    "source_id",
+    "resolution_method",
+    "source_path",
+    "sol",
     "raw_key_pair_count",
     "distinct_key_residue_count",
     "configured_key_count",
@@ -201,13 +220,17 @@ def key_residue_coverage_dataframe(result: RunResult) -> pd.DataFrame:
         rows.append(
             {
                 "ligand_id": summary.ligand_id if summary else "",
+                "source_pose_label": summary.source_pose_label if summary else "",
+                "source_molecule_name": summary.source_molecule_name if summary else "",
                 "source_file": summary.source_file if summary else "",
-                "source_path": summary.source_path if summary else "",
-                "source_id": summary.source_id if summary else "",
-                "pose_id": metrics.pose_id,
-                "sol": summary.sol if summary else None,
                 "pose": summary.pose if summary else None,
+                "pose_id": metrics.pose_id,
                 "docking_score": summary.docking_score if summary else None,
+                "score_type": summary.score_type if summary else "",
+                "source_id": summary.source_id if summary else "",
+                "resolution_method": summary.resolution_method if summary else "",
+                "source_path": summary.source_path if summary else "",
+                "sol": summary.sol if summary else None,
                 "raw_key_pair_count": metrics.raw_key_pair_count,
                 "distinct_key_residue_count": (
                     metrics.distinct_key_residue_count
@@ -246,6 +269,8 @@ def detail_dataframe(result: RunResult) -> pd.DataFrame:
             {
                 "ligand_id": detail.ligand_id,
                 "source_file": detail.source_file,
+                "source_pose_label": detail.source_pose_label,
+                "source_molecule_name": detail.source_molecule_name,
                 "interaction_type": detail.interaction_type,
                 "subtype": detail.subtype,
                 "ligand_atom": detail.ligand_atom,
@@ -273,6 +298,7 @@ def detail_dataframe(result: RunResult) -> pd.DataFrame:
                 "sol": detail.sol,
                 "pose": detail.pose,
                 "docking_score": detail.docking_score,
+                "score_type": detail.score_type,
                 "resolution_method": detail.resolution_method,
                 "source_path": detail.source_path,
                 "ligand_residue": detail.ligand.residue_id,
@@ -305,13 +331,16 @@ def residue_matrix_dataframe(result: RunResult, mode="count") -> pd.DataFrame:
         raise ValueError("mode must be 'count' or 'presence'")
     identity = [
         ("Identity", "ligand_id"),
+        ("Identity", "source_pose_label"),
+        ("Identity", "source_molecule_name"),
         ("Identity", "source_file"),
-        ("Identity", "source_path"),
-        ("Identity", "source_id"),
-        ("Identity", "pose_id"),
-        ("Identity", "sol"),
         ("Identity", "pose"),
+        ("Identity", "pose_id"),
         ("Identity", "docking_score"),
+        ("Identity", "score_type"),
+        ("Identity", "source_id"),
+        ("Identity", "source_path"),
+        ("Identity", "sol"),
     ]
     observed = sorted(
         {(detail.receptor_residue, detail.interaction_type) for detail in result.details},
@@ -326,13 +355,16 @@ def residue_matrix_dataframe(result: RunResult, mode="count") -> pd.DataFrame:
     for summary in result.summaries:
         row = [
             summary.ligand_id,
+            summary.source_pose_label,
+            summary.source_molecule_name,
             summary.source_file,
-            summary.source_path,
-            summary.source_id,
-            summary.pose_id,
-            summary.sol,
             summary.pose,
+            summary.pose_id,
             summary.docking_score,
+            summary.score_type,
+            summary.source_id,
+            summary.source_path,
+            summary.sol,
         ]
         for residue, kind in observed:
             value = counts.get((summary.pose_id, residue, kind), 0)
@@ -370,6 +402,18 @@ def parameters_dataframe(result: RunResult, export_filter=None) -> pd.DataFrame:
         ),
     ]
     rows.extend(("cutoff.%s" % key, value) for key, value in params.cutoffs)
+    rows.extend(
+        (name, getattr(params, name))
+        for name in (
+            "pose_semantics",
+            "pose_id_semantics",
+            "source_pose_label_semantics",
+            "ligand_id_semantics",
+            "source_molecule_name_semantics",
+            "docking_score_semantics",
+            "score_type_semantics",
+        )
+    )
     return pd.DataFrame(rows, columns=["parameter", "value"])
 
 
@@ -378,6 +422,11 @@ def input_qc_dataframe(result: RunResult) -> pd.DataFrame:
     for record in result.input_qc:
         rows.append(
             {
+                "ligand_id": record.ligand_id,
+                "source_pose_label": record.source_pose_label,
+                "source_molecule_name": record.source_molecule_name,
+                "docking_score": record.docking_score,
+                "score_type": record.score_type,
                 "source_id": record.source_id,
                 "source_file": record.source_file,
                 "source_path": record.source_path,
@@ -402,6 +451,11 @@ def input_qc_dataframe(result: RunResult) -> pd.DataFrame:
     return pd.DataFrame(
         rows,
         columns=[
+            "ligand_id",
+            "source_pose_label",
+            "source_molecule_name",
+            "docking_score",
+            "score_type",
             "source_id",
             "source_file",
             "source_path",
@@ -422,4 +476,43 @@ def input_qc_dataframe(result: RunResult) -> pd.DataFrame:
             "receptor_source_path",
             "group_id",
         ],
+    )
+
+
+LIGAND_INDEX_COLS = [
+    "ligand_id",
+    "source_pose_label",
+    "source_molecule_name",
+    "docking_score",
+    "score_type",
+    "source_file",
+    "pose",
+    "pose_id",
+    "source_id",
+    "resolution_method",
+    "source_path",
+]
+
+
+def ligand_index_dataframe(result: RunResult) -> pd.DataFrame:
+    """Return one source-to-observation identity row for every pose."""
+
+    return pd.DataFrame(
+        [
+            {
+                "ligand_id": summary.ligand_id,
+                "source_pose_label": summary.source_pose_label,
+                "source_molecule_name": summary.source_molecule_name,
+                "docking_score": summary.docking_score,
+                "score_type": summary.score_type,
+                "source_file": summary.source_file,
+                "pose": summary.pose,
+                "pose_id": summary.pose_id,
+                "source_id": summary.source_id,
+                "resolution_method": summary.resolution_method,
+                "source_path": summary.source_path,
+            }
+            for summary in result.summaries
+        ],
+        columns=LIGAND_INDEX_COLS,
     )

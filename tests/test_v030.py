@@ -96,6 +96,7 @@ def test_xlsx_v3_has_analysis_sheets_styles_qc_and_safe_text(fixture_path, tmp_p
     workbook = openpyxl.load_workbook(output, data_only=False)
     assert workbook.sheetnames == [
         "Summary",
+        "Ligand Index",
         "Residue Matrix",
         "Key Residue Coverage",
         "Detail",
@@ -123,7 +124,7 @@ def test_xlsx_v3_has_analysis_sheets_styles_qc_and_safe_text(fixture_path, tmp_p
             values_only=True,
         )
     )
-    assert parameters["schema_version"] == "3"
+    assert parameters["schema_version"] == "4"
 
 
 def test_filtered_export_recomputes_all_derived_views(fixture_path):
@@ -197,7 +198,7 @@ def test_xlsx_splits_wide_matrix_and_uses_filterable_second_header(
         for index in range(6)
     )
     result = replace(result, details=details)
-    monkeypatch.setattr(export, "_MAX_XLSX_COLUMNS", 10)
+    monkeypatch.setattr(export, "_MAX_XLSX_COLUMNS", 13)
 
     output = export.export_xlsx(result, tmp_path / "wide.xlsx")
     workbook = openpyxl.load_workbook(output)
@@ -206,17 +207,20 @@ def test_xlsx_splits_wide_matrix_and_uses_filterable_second_header(
     assert matrix_names == ["Residue Matrix 1", "Residue Matrix 2", "Residue Matrix 3"]
     for name in matrix_names:
         sheet = workbook[name]
-        assert sheet.max_column <= 10
+        assert sheet.max_column <= 13
         assert sheet.auto_filter.ref.startswith("A2:")
-        assert [sheet.cell(2, column).value for column in range(1, 9)] == [
+        assert [sheet.cell(2, column).value for column in range(1, 12)] == [
             "ligand_id",
+            "source_pose_label",
+            "source_molecule_name",
             "source_file",
-            "source_path",
-            "source_id",
-            "pose_id",
-            "sol",
             "pose",
+            "pose_id",
             "docking_score",
+            "score_type",
+            "source_id",
+            "source_path",
+            "sol",
         ]
 
 
@@ -303,6 +307,7 @@ def test_qc_only_workbook_is_exportable(fixture_path, tmp_path):
     assert not result.summaries
     assert workbook.sheetnames == [
         "Summary",
+        "Ligand Index",
         "Residue Matrix",
         "Key Residue Coverage",
         "Detail",

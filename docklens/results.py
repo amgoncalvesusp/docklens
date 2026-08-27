@@ -44,6 +44,9 @@ class Detail:
     docking_score: Optional[float] = None
     source_path: str = ""
     resolution_method: str = ""
+    source_pose_label: str = ""
+    source_molecule_name: str = ""
+    score_type: str = ""
     is_key_residue: bool = False
     water: Optional[Endpoint] = None
     receptor_water_distance_A: Optional[float] = None
@@ -93,6 +96,9 @@ class Summary:
     pose_id: str = ""
     source_path: str = ""
     resolution_method: str = ""
+    source_pose_label: str = ""
+    source_molecule_name: str = ""
+    score_type: str = ""
 
     def __post_init__(self):
         object.__setattr__(self, "counts", MappingProxyType(dict(self.counts)))
@@ -119,11 +125,16 @@ class InputQC:
     receptor_source_file: str = ""
     receptor_source_path: str = ""
     group_id: str = ""
+    ligand_id: str = ""
+    source_pose_label: str = ""
+    source_molecule_name: str = ""
+    docking_score: Optional[float] = None
+    score_type: str = ""
 
 
 @dataclass(frozen=True)
 class AnalysisParameters:
-    schema_version: str = "3"
+    schema_version: str = "4"
     app_version: str = ""
     started_at: str = ""
     hbond_preset: str = "plip"
@@ -131,6 +142,19 @@ class AnalysisParameters:
     interaction_types: Tuple[str, ...] = ()
     key_residues: Tuple[str, ...] = ()
     counting_unit: str = "semantic_interaction"
+    pose_semantics: str = "1-based observation index within source_file"
+    pose_id_semantics: str = "internal stable DockLens observation identifier"
+    source_pose_label_semantics: str = (
+        "source/vendor-native pose label when available"
+    )
+    ligand_id_semantics: str = "compound/ligand identifier derived from source metadata"
+    source_molecule_name_semantics: str = (
+        "verbatim molecule name from source structure file"
+    )
+    docking_score_semantics: str = (
+        "score imported from source file; never recalculated by DockLens"
+    )
+    score_type_semantics: str = "source score/function identifier"
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,33 @@ conservative LUNA × DSV cross-profile. DockLens has **no PyMOL dependency**.
 
 **Inventor:** Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
 
+## Release 1.3.0
+
+DockLens 1.3 preserves source-native ligand and pose identity from MOL2 through
+the interface, analytical tables, Excel exports and reopened projects.
+
+- Paired multipose workflows prefer source `ligand_id` values and retain the
+  verbatim `source_molecule_name`, `source_pose_label`, imported docking score
+  and `score_type`.
+- XLSX exports include a `Ligand Index` sheet and repeat traceability metadata
+  in Summary, Detail, Key Residue Coverage, Residue Matrix and Input QC.
+- `.docklens` schema 5 stores summaries, details and Input QC as integrity-
+  checked NDJSON chunks. Schemas 1–4 remain readable.
+
+Schema 5 keeps the project manifest and methods record small, then stores result
+records incrementally under `results/system-a/` and `results/system-b/`:
+
+```text
+manifest.json
+methods.txt
+results/system-a/summaries/part-0001.ndjson
+results/system-a/details/part-0001.ndjson
+results/system-a/input-qc/part-0001.ndjson
+```
+
+Each chunk has a SHA-256 digest, byte count and record count in the manifest;
+the reader validates those values while streaming the ZIP entries.
+
 ## Release 1.2.0
 
 This release unifies every loading route around an immutable input plan and
@@ -34,7 +61,7 @@ adds the explicit external-protein workflow requested for multi-file docking.
   receptor. PDB/PDBQT HETATM ligands are separated by connectivity, while
   combined PDBQT inputs preserve ATOM/HETATM classification.
 - `.docklens` projects use schema 4 with explicit plans and continue to read
-  schemas 1–3. The methods record now states the input interpretation.
+  schemas 1–4. The methods record now states the input interpretation.
 - Windows releases provide both `DockLens-windows-x86_64.exe` (portable) and
   `DockLens-setup-windows-x86_64.exe` (installer). The installer creates the
   application shortcuts and can be removed from Windows Apps.
@@ -110,7 +137,7 @@ pyinstaller --noconfirm --onefile --windowed --name DockLens run_docklens.py
 To build the Windows installer locally, install Inno Setup 6 and run:
 
 ```
-iscc /DAppVersion=1.2.0 /DSourceExe=dist\\DockLens.exe /DOutputDir=dist installer\\DockLens.iss
+  iscc /DAppVersion=1.3.0 /DSourceExe=dist\\DockLens.exe /DOutputDir=dist installer\\DockLens.iss
 ```
 
 ## DockingHub integration

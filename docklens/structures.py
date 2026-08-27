@@ -62,7 +62,11 @@ class ParsedPose:
     fmt            'mol2' | 'pdb' | 'pdbqt'
     source_file    path
     pose_index     0-based index within a multi-MODEL file
+    molecule_name  verbatim source molecule name, when present
+    ligand_id_hint first source identity field, when present
+    source_pose_label source/vendor-native pose label, when recognized
     score          docking score if present in the file, else None
+    score_type     source score/function identifier, when present
     sol            'sol<N>' number parsed from the filename, else None
     """
 
@@ -77,6 +81,10 @@ class ParsedPose:
     pose_index: int = 0
     score: Optional[float] = None
     sol: Optional[int] = None
+    molecule_name: str = ""
+    ligand_id_hint: str = ""
+    source_pose_label: str = ""
+    score_type: str = ""
 
 
 def normalize_element(sym: str) -> str:

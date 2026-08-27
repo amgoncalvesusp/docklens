@@ -65,6 +65,11 @@ def _observation_suffix(
     include_replica: bool,
 ) -> str:
     if mode == "docking":
+        source_pose_label = str(
+            getattr(summary, "source_pose_label", "") or ""
+        ).strip()
+        if source_pose_label:
+            return source_pose_label
         pose = getattr(summary, "pose", None)
         return f"Pose {pose if pose is not None else ordinal + 1}"
     frame = getattr(point, "frame_index", None)

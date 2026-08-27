@@ -21,6 +21,7 @@ def run_self_check():
         workbook = load_workbook(output, read_only=True)
         expected = [
             "Summary",
+            "Ligand Index",
             "Residue Matrix",
             "Key Residue Coverage",
             "Detail",

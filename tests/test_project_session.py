@@ -8,6 +8,7 @@ import zipfile
 
 import pytest
 
+from docklens import project_result_codec
 from docklens.project_session import (
     ProjectDataset,
     ProjectInput,
@@ -310,9 +311,7 @@ def test_project_rejects_internal_hash_tampering_and_path_traversal(tmp_path):
             info.filename: archive.read(info.filename)
             for info in archive.infolist()
         }
-    payload_name = next(
-        name for name in members if name.endswith("run_result.json")
-    )
+    payload_name = next(name for name in members if name.endswith(".ndjson"))
     members[payload_name] += b" "
     tampered = tmp_path / "tampered.docklens"
     with zipfile.ZipFile(tampered, "w") as archive:
@@ -344,3 +343,56 @@ def test_project_input_rejects_network_and_uri_paths_before_validation():
                 size_bytes=1,
                 modified_ns=1,
             )
+
+
+def test_schema5_writes_incremental_ndjson_chunks_and_roundtrips(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "frames.pdb"
+    source.write_text("MODEL 1\nENDMDL\n", encoding="utf-8")
+    base = _project(source)
+    details = tuple(
+        replace(
+            base.primary.result.details[0],
+            interaction_id=f"interaction-{index}",
+        )
+        for index in range(80)
+    )
+    result = replace(base.primary.result, details=details)
+    project = replace(base, primary=replace(base.primary, result=result))
+    monkeypatch.setattr(project_result_codec, "MAX_RESULT_CHUNK_BYTES", 4096)
+
+    destination = tmp_path / "chunked.docklens"
+    save_project(project, destination)
+
+    with zipfile.ZipFile(destination) as archive:
+        names = set(archive.namelist())
+        manifest = json.loads(archive.read("manifest.json"))
+    assert manifest["schema_version"] == "5"
+    assert not any(name.endswith("run_result.json") for name in names)
+    assert len(
+        [name for name in names if name.startswith("results/system-a/details/")]
+    ) > 1
+    assert load_project(destination) == project
+
+
+def test_schema5_chunk_tampering_raises_project_integrity_error(tmp_path):
+    source = tmp_path / "frames.pdb"
+    source.write_text("MODEL 1\nENDMDL\n", encoding="utf-8")
+    destination = tmp_path / "original.docklens"
+    save_project(_project(source), destination)
+
+    with zipfile.ZipFile(destination) as archive:
+        members = {
+            info.filename: archive.read(info.filename)
+            for info in archive.infolist()
+        }
+    chunk_name = next(name for name in members if name.endswith(".ndjson"))
+    members[chunk_name] = members[chunk_name] + b"\n"
+    tampered = tmp_path / "tampered.docklens"
+    with zipfile.ZipFile(tampered, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+
+    with pytest.raises(ValueError, match="integrity|hash"):
+        load_project(tampered)

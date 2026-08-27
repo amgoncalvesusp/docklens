@@ -18,6 +18,7 @@ from .export_views import (
     detail_dataframe,
     input_qc_dataframe,
     key_residue_coverage_dataframe,
+    ligand_index_dataframe,
     parameters_dataframe,
     residue_matrix_dataframe,
     summary_dataframe,
@@ -91,7 +92,7 @@ def _fill(hex_color):
     return PatternFill(start_color=argb, end_color=argb, fill_type="solid")
 
 
-def _write_matrix_sheet(workbook, matrix, title="Residue Matrix", position=1):
+def _write_matrix_sheet(workbook, matrix, title="Residue Matrix", position=2):
     worksheet = workbook.create_sheet(title, position)
     for column_index, (group, label) in enumerate(matrix.columns, 1):
         worksheet.cell(1, column_index, _sanitize_cell(group))
@@ -177,6 +178,7 @@ def _format_standard_sheet(worksheet):
 def _style_workbook(workbook):
     for name in (
         "Summary",
+        "Ligand Index",
         "Key Residue Coverage",
         "Detail",
         "Parameters",
@@ -230,6 +232,7 @@ def export_xlsx(result, path, export_filter=None) -> str:
     matrix = residue_matrix_dataframe(view, mode=export_filter.matrix_mode)
     frames = {
         "Summary": summary_dataframe(view),
+        "Ligand Index": ligand_index_dataframe(view),
         "Key Residue Coverage": key_residue_coverage_dataframe(view),
         "Detail": detail_dataframe(view),
         "Parameters": parameters_dataframe(result, export_filter),
@@ -251,7 +254,7 @@ def export_xlsx(result, path, export_filter=None) -> str:
             for index, matrix_chunk in enumerate(matrices, 1):
                 title = "Residue Matrix %d" % index if numbered else "Residue Matrix"
                 _write_matrix_sheet(
-                    workbook, matrix_chunk, title=title, position=index
+                    workbook, matrix_chunk, title=title, position=index + 1
                 )
             _style_workbook(workbook)
             _neutralize_formulas(workbook)
@@ -270,6 +273,7 @@ __all__ = [
     "export_xlsx",
     "input_qc_dataframe",
     "key_residue_coverage_dataframe",
+    "ligand_index_dataframe",
     "parameters_dataframe",
     "residue_matrix_dataframe",
     "summary_dataframe",

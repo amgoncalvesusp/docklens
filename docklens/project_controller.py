@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from . import __version__, batch_runner as br
+from . import __version__, batch_runner as br, project_result_codec
 from .input_plan import InputPlan, plan_from_paths
 from .project_session import (
     ProjectDataset,
@@ -22,6 +22,8 @@ from .project_session import (
 
 LOGGER = logging.getLogger(__name__)
 _WORKSPACES = ("residues", "fingerprint", "compare", "tables")
+ProjectLimitError = project_result_codec.ProjectLimitError
+ProjectSerializationError = project_result_codec.ProjectSerializationError
 
 
 class ProjectControllerMixin:
@@ -154,7 +156,33 @@ class ProjectControllerMixin:
             return
         try:
             outputs = save_project(self._project_state(), path)
-        except Exception:  # noqa: BLE001 - contain filesystem/codec errors
+        except ProjectLimitError:
+            LOGGER.exception("DockLens project save exceeded safe limits")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Project could not be saved",
+                "The project exceeds DockLens' safe project limits.\n"
+                "The analysis results remain available and can still be exported.",
+            )
+            return
+        except ProjectSerializationError:
+            LOGGER.exception("DockLens project serialization failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Project could not be saved",
+                "DockLens could not serialize the current analysis into a project.",
+            )
+            return
+        except OSError:
+            LOGGER.exception("DockLens project destination write failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Project could not be saved",
+                "DockLens could not write the destination.\n"
+                "Check free disk space, write permissions and destination availability.",
+            )
+            return
+        except Exception:  # noqa: BLE001 - contain unexpected codec errors
             LOGGER.exception("DockLens project save failed")
             QtWidgets.QMessageBox.critical(
                 self,
@@ -417,4 +445,8 @@ class ProjectControllerMixin:
         return candidate if trusted and candidate.is_file() else None
 
 
-__all__ = ["ProjectControllerMixin"]
+__all__ = [
+    "ProjectControllerMixin",
+    "ProjectLimitError",
+    "ProjectSerializationError",
+]

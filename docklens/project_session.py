@@ -21,6 +21,7 @@ import zipfile
 from .observation_series import ObservationPoint, ObservationSeries
 from .input_plan import InputJob, InputPlan
 from .ligand_selection import ligand_groups
+from . import project_result_codec
 from .results import (
     AnalysisParameters,
     Detail,
@@ -30,11 +31,13 @@ from .results import (
     Summary,
 )
 
-PROJECT_SCHEMA_VERSION = "4"
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2", "3", "4"})
-MAX_PROJECT_BYTES = 5 * 1024 * 1024
+PROJECT_SCHEMA_VERSION = "5"
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({"1", "2", "3", "4", "5"})
+MAX_PROJECT_BYTES = project_result_codec.MAX_PROJECT_BYTES
+MAX_TOTAL_UNCOMPRESSED_BYTES = project_result_codec.MAX_TOTAL_UNCOMPRESSED_BYTES
 MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
-MAX_ARCHIVE_ENTRIES = 8
+MAX_LEGACY_PROJECT_BYTES = 5 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = project_result_codec.MAX_ARCHIVE_ENTRIES
 MAX_JSON_DEPTH = 40
 _FIXED_ENTRIES = frozenset({"manifest.json", "methods.txt"})
 
@@ -436,7 +439,7 @@ def save_project(
         allow_nan=False,
     ).encode("utf-8")
     if len(encoded) > MAX_UNCOMPRESSED_BYTES:
-        raise ValueError("project is too large")
+        raise project_result_codec.ProjectLimitError("project is too large")
 
     entries = {
         "manifest.json": encoded,
@@ -458,6 +461,8 @@ def load_project(source: str | os.PathLike[str]) -> ProjectState:
     if not zipfile.is_zipfile(path):
         # Read-only legacy JSON diagnostics keep older projects intelligible.
         # New projects are always written as ZIP containers.
+        if size > MAX_LEGACY_PROJECT_BYTES:
+            raise ValueError("project file is too large")
         return _load_legacy_json(path)
 
     try:
@@ -471,6 +476,7 @@ def load_project(source: str | os.PathLike[str]) -> ProjectState:
             schema_version = str(document.get("schema_version", ""))
             if schema_version not in SUPPORTED_PROJECT_SCHEMA_VERSIONS:
                 raise ValueError("unsupported project schema")
+            _validate_archive_infos(infos, schema_version=schema_version)
             names = {info.filename for info in infos}
             if "methods.txt" not in names:
                 raise ValueError("project is missing required entries")
@@ -483,6 +489,15 @@ def load_project(source: str | os.PathLike[str]) -> ProjectState:
             referenced: set[str] = set()
 
             def load_result(reference: Mapping[str, Any]) -> RunResult:
+                if "chunks" in reference or schema_version == "5":
+                    try:
+                        result, result_entries = project_result_codec.decode_result(
+                            archive, reference, names
+                        )
+                    except project_result_codec.ResultIntegrityError as exc:
+                        raise ProjectIntegrityError(str(exc)) from exc
+                    referenced.update(result_entries)
+                    return result
                 entry = _text(reference, "entry")
                 expected_hash = _sha_text(reference, "sha256")
                 expected_size = _integer(reference, "size_bytes")
@@ -507,7 +522,9 @@ def load_project(source: str | os.PathLike[str]) -> ProjectState:
 
             project = _decode_document(document, load_result)
             unreferenced = {
-                name for name in names if _is_result_entry(name)
+                name
+                for name in names
+                if _is_result_entry(name) or project_result_codec.is_chunk_entry(name)
             } - referenced
             if unreferenced:
                 raise ValueError("project contains an unreferenced result entry")
@@ -626,13 +643,6 @@ def _decode_document(
 def _project_to_payload(
     project: ProjectState, result_entries: dict[str, bytes]
 ) -> dict[str, Any]:
-    used_names: set[str] = set()
-    primary_entry = _result_entry_name(project.primary.label, used_names)
-    comparison_entry = (
-        _result_entry_name(project.comparison.label, used_names)
-        if project.comparison is not None
-        else None
-    )
     return {
         "app_version": project.app_version,
         "analysis_profile": project.analysis_profile,
@@ -644,11 +654,11 @@ def _project_to_payload(
         "state_threshold": project.state_threshold,
         "bootstrap_iterations": project.bootstrap_iterations,
         "primary": _dataset_to_payload(
-            project.primary, primary_entry, result_entries
+            project.primary, "system-a", result_entries
         ),
         "comparison": (
             _dataset_to_payload(
-                project.comparison, comparison_entry, result_entries
+                project.comparison, "system-b", result_entries
             )
             if project.comparison is not None
             else None
@@ -667,28 +677,14 @@ def _project_to_payload(
 
 def _dataset_to_payload(
     dataset: ProjectDataset,
-    result_entry: str | None,
+    dataset_key: str,
     result_entries: dict[str, bytes],
 ) -> dict[str, Any]:
     result_reference = None
     if dataset.result is not None:
-        if result_entry is None:
-            raise ValueError("cached result entry name is missing")
-        encoded = json.dumps(
-            _result_to_payload(dataset.result),
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-            allow_nan=False,
-        ).encode("utf-8")
-        if len(encoded) > MAX_UNCOMPRESSED_BYTES:
-            raise ValueError("cached analysis result is too large")
-        result_entries[result_entry] = encoded
-        result_reference = {
-            "entry": result_entry,
-            "sha256": _sha256_bytes(encoded),
-            "size_bytes": len(encoded),
-        }
+        result_reference = project_result_codec.encode_result(
+            dataset.result, dataset_key, result_entries
+        )
     return {
         "label": dataset.label,
         "mode": dataset.mode,
@@ -981,8 +977,13 @@ def _is_result_entry(name: str) -> bool:
     )
 
 
-def _validate_archive_infos(infos: list[zipfile.ZipInfo]) -> None:
-    if len(infos) > MAX_ARCHIVE_ENTRIES:
+def _validate_archive_infos(
+    infos: list[zipfile.ZipInfo], schema_version: str | None = None
+) -> None:
+    is_v5 = schema_version in (None, "5")
+    max_entries = MAX_ARCHIVE_ENTRIES if is_v5 else 8
+    max_total = MAX_TOTAL_UNCOMPRESSED_BYTES if is_v5 else MAX_UNCOMPRESSED_BYTES
+    if len(infos) > max_entries:
         raise ValueError("project contains too many entries")
     names: set[str] = set()
     total = 0
@@ -999,14 +1000,23 @@ def _validate_archive_infos(infos: list[zipfile.ZipInfo]) -> None:
             raise ValueError("project contains an unsafe entry name")
         if name in names:
             raise ValueError("project contains duplicate entries")
-        if name not in _FIXED_ENTRIES and not _is_result_entry(name):
+        is_result = _is_result_entry(name)
+        is_chunk = project_result_codec.is_chunk_entry(name)
+        allowed_result = (
+            is_result or is_chunk
+            if schema_version is None
+            else is_chunk
+            if is_v5
+            else is_result or is_chunk
+        )
+        if name not in _FIXED_ENTRIES and not allowed_result:
             raise ValueError("project contains an unknown entry")
         if info.is_dir() or ((info.external_attr >> 16) & 0o170000) == 0o120000:
             raise ValueError("project contains an unsupported entry")
-        if info.file_size < 0 or info.file_size > MAX_UNCOMPRESSED_BYTES:
+        if info.file_size < 0 or info.file_size > max_total:
             raise ValueError("project entry is too large")
         total += info.file_size
-        if total > MAX_UNCOMPRESSED_BYTES:
+        if total > max_total:
             raise ValueError("project contents are too large")
         names.add(name)
     if "manifest.json" not in names:
@@ -1024,6 +1034,15 @@ def _read_bounded(
 
 
 def _atomic_zip_write(destination: Path, entries: Mapping[str, bytes]) -> None:
+    if len(entries) > MAX_ARCHIVE_ENTRIES:
+        raise project_result_codec.ProjectLimitError(
+            "project contains too many entries"
+        )
+    total_uncompressed = sum(len(payload) for payload in entries.values())
+    if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES:
+        raise project_result_codec.ProjectLimitError(
+            "project contents are too large"
+        )
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -1039,7 +1058,9 @@ def _atomic_zip_write(destination: Path, entries: Mapping[str, bytes]) -> None:
             for name, payload in entries.items():
                 archive.writestr(name, payload)
         if temporary.stat().st_size > MAX_PROJECT_BYTES:
-            raise ValueError("project file is too large")
+            raise project_result_codec.ProjectLimitError(
+                "project file is too large"
+            )
         with temporary.open("r+b") as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, destination)

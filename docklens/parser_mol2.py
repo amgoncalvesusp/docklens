@@ -13,9 +13,12 @@ import math
 import re
 
 from .interaction_core import Atom
+from .source_identity import parse_source_pose_identity
 from .structures import ParsedPose, normalize_element, parse_sol
 
 _RESN_RESI = re.compile(r"^([A-Za-z][A-Za-z0-9]*?)(\d+)$")
+_PROPERTY_RE = re.compile(r"^\s*>\s*<([^>]+)>\s*$")
+_FITNESS_RE = re.compile(r"^Gold\..+\.Fitness$", re.IGNORECASE)
 
 
 def _split_resn_resi(subst_name, subst_id):
@@ -70,6 +73,30 @@ def _parse_one_molecule(block_lines, source_file):
     group_info = {}  # subst_id -> raw info string (for GROUP naming)
     ccdc_ligand = None
     ccdc_receptor = None
+    molecule_name = ""
+    score = None
+    score_type = ""
+
+    for index, raw in enumerate(block_lines):
+        match = _PROPERTY_RE.match(raw)
+        if not match or not _FITNESS_RE.fullmatch(match.group(1).strip()):
+            continue
+        for candidate in block_lines[index + 1 :]:
+            value = candidate.strip()
+            if not value:
+                continue
+            if value.startswith("@<TRIPOS>") or _PROPERTY_RE.match(candidate):
+                break
+            try:
+                parsed = float(value)
+            except ValueError:
+                break
+            if math.isfinite(parsed):
+                score = parsed
+                score_type = match.group(1).strip()
+                break
+        if score is not None:
+            break
 
     i = 0
     while i < len(block_lines):
@@ -113,6 +140,12 @@ def _parse_one_molecule(block_lines, source_file):
                         partial_charge,
                     )
                 )
+            i += 1
+            continue
+
+        if section == "MOLECULE":
+            if not molecule_name:
+                molecule_name = line.rstrip("\r\n")
             i += 1
             continue
 
@@ -198,6 +231,7 @@ def _parse_one_molecule(block_lines, source_file):
             u.bond_orders[v.idx] = bond_type
             v.bond_orders[u.idx] = bond_type
 
+    identity = parse_source_pose_identity(molecule_name)
     pose = ParsedPose(
         atoms=atoms,
         atom_by_serial=atom_by_serial,
@@ -207,6 +241,11 @@ def _parse_one_molecule(block_lines, source_file):
         ccdc_receptor=ccdc_receptor,
         group_subst=group_subst,
         sol=parse_sol(source_file),
+        score=score,
+        molecule_name=identity.molecule_name,
+        ligand_id_hint=identity.ligand_id,
+        source_pose_label=identity.source_pose_label,
+        score_type=score_type,
     )
     pose.group_info = group_info  # attach raw GROUP info strings (ligand naming)
     return pose

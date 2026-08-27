@@ -252,6 +252,9 @@ def _detail_from_interaction(
     sol=None,
     score=None,
     resolution_method="",
+    source_pose_label="",
+    source_molecule_name="",
+    score_type="",
 ):
     a, b = it["a_obj"], it["b_obj"]
     if endpoint_side(a) == "ligand":
@@ -285,6 +288,9 @@ def _detail_from_interaction(
         docking_score=score,
         source_path=os.path.abspath(source_file),
         resolution_method=resolution_method,
+        source_pose_label=source_pose_label,
+        source_molecule_name=source_molecule_name,
+        score_type=score_type,
         is_key_residue=_is_key(rec_res, res_nochain, key_set),
         water=_endpoint(water_obj, "bridge") if water_obj is not None else None,
         receptor_water_distance_A=it.get("receptor_water_distance"),
@@ -315,6 +321,9 @@ def _summarize(
     source_id="",
     pose_id="",
     resolution_method="",
+    source_pose_label="",
+    source_molecule_name="",
+    score_type="",
 ):
     counts = {t: 0 for t in VALID_TYPES}
     n_key = 0
@@ -335,6 +344,9 @@ def _summarize(
         pose_id=pose_id,
         source_path=os.path.abspath(source_file),
         resolution_method=resolution_method,
+        source_pose_label=source_pose_label,
+        source_molecule_name=source_molecule_name,
+        score_type=score_type,
     )
 
 
@@ -497,6 +509,10 @@ def _run_resolution(
     source_id,
     pose_id,
     pose_no,
+    ligand_id,
+    source_pose_label,
+    source_molecule_name,
+    score_type,
     key_set,
     requested_types,
     effective_cutoffs,
@@ -514,7 +530,7 @@ def _run_resolution(
     details = [
         _detail_from_interaction(
             item,
-            resolution.ligand_id,
+            ligand_id,
             path,
             key_set,
             source_id=source_id,
@@ -524,11 +540,14 @@ def _run_resolution(
             sol=pose.sol,
             score=pose.score,
             resolution_method=resolution.method,
+            source_pose_label=source_pose_label,
+            source_molecule_name=source_molecule_name,
+            score_type=score_type,
         )
         for index, item in enumerate(interactions, 1)
     ]
     summary = _summarize(
-        resolution.ligand_id,
+        ligand_id,
         path,
         pose.sol,
         pose_no,
@@ -538,6 +557,9 @@ def _run_resolution(
         source_id=source_id,
         pose_id=pose_id,
         resolution_method=resolution.method,
+        source_pose_label=source_pose_label,
+        source_molecule_name=source_molecule_name,
+        score_type=score_type,
     )
     return summary, details
 
@@ -634,14 +656,22 @@ def run_plan(
         for pose in poses:
             pose_no = pose.pose_index + 1
             pose_id_prefix = "%s:P%04d" % (source_id, pose_no)
+            source_molecule_name = getattr(pose, "molecule_name", "") or ""
+            source_pose_label = getattr(pose, "source_pose_label", "") or ""
+            score_type = getattr(pose, "score_type", "") or ""
             try:
                 if job.kind == "paired":
+                    ligand_id = (
+                        getattr(pose, "ligand_id_hint", "")
+                        or source_molecule_name
+                        or "%s_pose_%04d" % (stem, pose_no)
+                    )
                     resolutions = [
                         Resolution(
                             receptor_atoms,
                             list(pose.atoms),
                             receptor_waters,
-                            "%s_pose_%04d" % (stem, pose_no),
+                            ligand_id,
                             job.resolution_method or "paired-plan",
                         )
                     ]
@@ -665,6 +695,10 @@ def run_plan(
                             code="pose_error",
                             message=_safe_exception_message("Could not process pose", exc),
                             poses_found=len(poses),
+                            source_pose_label=source_pose_label,
+                            source_molecule_name=source_molecule_name,
+                            docking_score=pose.score,
+                            score_type=score_type,
                         )
                     )
                 )
@@ -684,6 +718,15 @@ def run_plan(
                     ligand_atoms=len(resolution.ligand_atoms),
                     water_atoms=len(resolution.waters),
                     warnings=tuple(_safe_qc_text(item) for item in resolution.warnings),
+                    ligand_id=(
+                        ligand_id
+                        if job.kind == "paired"
+                        else resolution.ligand_id
+                    ),
+                    source_pose_label=source_pose_label,
+                    source_molecule_name=source_molecule_name,
+                    docking_score=pose.score,
+                    score_type=score_type,
                 )
                 if resolution.needs_confirmation and not confirm_fallback:
                     pending_out.append(
@@ -724,6 +767,14 @@ def run_plan(
                         source_id=source_id,
                         pose_id=pose_id,
                         pose_no=pose_no,
+                        ligand_id=(
+                            ligand_id
+                            if job.kind == "paired"
+                            else resolution.ligand_id
+                        ),
+                        source_pose_label=source_pose_label,
+                        source_molecule_name=source_molecule_name,
+                        score_type=score_type,
                         key_set=key_set,
                         requested_types=requested_types,
                         effective_cutoffs=effective_cutoffs,

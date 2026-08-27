@@ -134,6 +134,28 @@ def test_shared_receptor_accepts_pdbqt_and_mol2_in_one_plan(tmp_path, fixture_pa
     assert not [item for item in result.input_qc if item.status == "error"]
 
 
+def test_paired_mode_prefers_source_mol2_identity_and_score(tmp_path, fixture_path):
+    receptor = tmp_path / "protein.pdb"
+    _write_receptor(receptor)
+
+    result = br.run_paired(
+        receptor,
+        fixture_path("gold_named_multipose.mol2"),
+    )
+
+    assert len(result.summaries) == 3
+    assert result.summaries[0].ligand_id == "EOS100588"
+    assert result.summaries[0].source_pose_label == "dock48"
+    assert result.summaries[0].source_molecule_name == (
+        "EOS100588|Actives_100588|mol2|1|dock48"
+    )
+    assert result.summaries[0].docking_score == 86.2405
+    assert result.summaries[0].score_type == "Gold.Goldscore.Fitness"
+    assert result.summaries[0].pose_id == "S000001:P0001:R001"
+    assert result.summaries[1].ligand_id == "EOS100588"
+    assert result.summaries[1].source_pose_label == "dock43"
+
+
 def test_two_receptor_groups_keep_their_provenance_separate(tmp_path):
     receptor_a = tmp_path / "protein_A.pdb"
     receptor_b = tmp_path / "protein_B.pdb"

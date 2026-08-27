@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from docklens.observation_identity import observation_labels
 from docklens.observation_series import ObservationPoint, ObservationSeries
 
@@ -101,3 +103,48 @@ def test_unknown_label_mode_is_rejected(multi_source_result):
             mode="docking",
             label_mode="unsafe",
         )
+
+
+def test_source_pose_labels_are_used_for_multipose_display_names(
+    multi_source_result,
+):
+    result = replace(
+        multi_source_result,
+        summaries=tuple(
+            replace(
+                summary,
+                source_pose_label=(
+                    f"dock{summary.pose}" if summary.pose < 3 else ""
+                ),
+            )
+            for summary in multi_source_result.summaries
+        ),
+    )
+
+    labels = observation_labels(result, mode="docking", label_mode="ligand")
+
+    assert tuple(labels.values()) == (
+        "LIG-A · dock1",
+        "LIG-A · dock2",
+        "LIG-B",
+    )
+
+
+def test_missing_source_pose_label_falls_back_to_human_pose_number(
+    multi_source_result,
+):
+    result = replace(
+        multi_source_result,
+        summaries=tuple(
+            replace(summary, source_pose_label="")
+            for summary in multi_source_result.summaries
+        ),
+    )
+
+    labels = observation_labels(result, mode="docking", label_mode="ligand")
+
+    assert tuple(labels.values()) == (
+        "LIG-A · Pose 1",
+        "LIG-A · Pose 2",
+        "LIG-B",
+    )

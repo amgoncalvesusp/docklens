@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0 — 2026-08-26
+
+### Added
+
+- Preserve source-native ligand and pose identities throughout analysis.
+- Parse molecule names and GOLD `Gold.*.Fitness` docking scores from MOL2.
+- Add source pose metadata to results, QC, interface labels and XLSX exports.
+- Add the `Ligand Index` worksheet and scalable chunked `.docklens` schema 5.
+
+### Changed
+
+- Paired workflows now prefer source ligand identities over generated pose names.
+- Analytical exports repeat direct ligand-to-pose traceability.
+- Large project results are written and verified as incremental NDJSON chunks.
+
+### Compatibility
+
+- Project schemas 1–4 remain readable.
+
 ## 1.2.0 — 2026-08-18
 
 ### Input architecture and scientific correctness
@@ -18,7 +37,7 @@
   receptor atoms for one another. PDB/PDBQT HETATM candidates are split by
   connectivity, and PDBQT ATOM/HETATM classification is preserved.
 - `.docklens` projects now use schema 4 while retaining migrations for
-  schemas 1–3. Explicit input plans, external receptor paths and input modes
+  schemas 1–4. Explicit input plans, external receptor paths and input modes
   are included in the methods record.
 
 ### Desktop release
