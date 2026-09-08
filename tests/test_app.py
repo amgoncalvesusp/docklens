@@ -82,11 +82,11 @@ def test_manifest_error_is_safe_in_windowed_build_without_stderr(monkeypatch, tm
     assert app.main() == 2
 
 
-def test_packaged_self_check_creates_and_reopens_workbook():
+def test_packaged_self_check_creates_and_reopens_workbook(qapp):
     assert self_check.run_self_check() == 0
 
 
-def test_self_check_returns_through_bootloader(monkeypatch):
+def test_self_check_returns_through_bootloader(monkeypatch, qapp):
     monkeypatch.setattr(
         self_check.os,
         "_exit",
@@ -94,3 +94,14 @@ def test_self_check_returns_through_bootloader(monkeypatch):
     )
 
     assert self_check.run_self_check() == 0
+
+
+def test_self_check_preserves_host_event_loop(qapp, qtbot):
+    from PyQt5 import QtCore
+
+    original = qapp.quitOnLastWindowClosed()
+    assert self_check.run_self_check() == 0
+    delivered = []
+    QtCore.QTimer.singleShot(10, lambda: delivered.append(True))
+    qtbot.waitUntil(lambda: delivered == [True])
+    assert qapp.quitOnLastWindowClosed() == original

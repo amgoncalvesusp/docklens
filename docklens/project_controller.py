@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from . import __version__, batch_runner as br, project_result_codec
+from . import __version__, project_result_codec
 from .input_plan import InputPlan, plan_from_paths
 from .project_session import (
     ProjectDataset,
@@ -58,6 +58,8 @@ class ProjectControllerMixin:
         return plan_from_paths(paths) if paths else None
 
     def _project_state(self):
+        if self._keys_pending():
+            raise ValueError("Key residue changes are pending; recalculate or discard first")
         active_index = self.workspace_stack.currentIndex()
         active = (
             _WORKSPACES[active_index]
@@ -99,7 +101,7 @@ class ProjectControllerMixin:
             analysis_profile=self._analysis_profile(),
             hbond_preset=self._hbond_preset(),
             key_residues=tuple(
-                sorted(br.normalize_key_residues(self.key_edit.text()))
+                sorted(self._applied_keys(self._result))
             ),
             selected_types=tuple(self._selected_types()),
             active_workspace=active,
@@ -128,6 +130,7 @@ class ProjectControllerMixin:
                 or "residue_type"
             ),
             heatmap_top_n=workspace.heatmap_top_combo.currentData(),
+            chart_ranking=workspace.ranking_criterion,
         )
 
     def _save_project(self):
@@ -232,6 +235,7 @@ class ProjectControllerMixin:
 
     def _restore_project(self, project, stale_messages=()):
         """Apply a fully decoded project after all integrity checks succeed."""
+        self._cancel_key_recalculation()
         controls = (
             self.preset_combo,
             self.analysis_combo,
@@ -267,7 +271,7 @@ class ProjectControllerMixin:
             and project.comparison.input_plan is not None
             else self._fallback_plan(self._comparison_files)
         )
-        self.key_edit.setText(" ".join(project.key_residues))
+        self._discard_key_changes()
         selected_types = set(project.selected_types)
         for kind, checkbox in self.type_boxes.items():
             checkbox.setChecked(kind in selected_types)
@@ -341,6 +345,7 @@ class ProjectControllerMixin:
         workspace.set_observation_label_mode(
             project.observation_label_mode
         )
+        workspace.set_ranking_criterion(project.chart_ranking)
         workspace.refresh_heatmap()
         self._chart_scope_changed()
         workspace.select_residue(project.selected_residue)

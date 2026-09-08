@@ -238,6 +238,7 @@ def _filters_card(window):
         "e.g. SER70; LYS73; GLU166 (space, comma, semicolon or line break)"
     )
     window.key_edit.editingFinished.connect(window._key_text_changed)
+    window.key_edit.textChanged.connect(window._key_text_edited)
     layout.addWidget(window.key_edit, 0, 1, 1, 2)
     layout.addWidget(QtWidgets.QLabel("Search:"), 0, 3)
     window.search_edit = QtWidgets.QLineEdit()
@@ -266,6 +267,17 @@ def _filters_card(window):
     window.key_status.setWordWrap(True)
     window.key_status.setObjectName("workspaceDescription")
     layout.addWidget(window.key_status, 3, 0, 1, 6)
+    window.recalculate_keys_button = QtWidgets.QPushButton("Recalculate")
+    window.recalculate_keys_button.setToolTip(
+        "Apply selected key residues to both systems without repeating detection."
+    )
+    window.recalculate_keys_button.setEnabled(False)
+    window.recalculate_keys_button.clicked.connect(window._recompute_key)
+    layout.addWidget(window.recalculate_keys_button, 4, 0, 1, 2)
+    window.discard_keys_button = QtWidgets.QPushButton("Discard changes")
+    window.discard_keys_button.setEnabled(False)
+    window.discard_keys_button.clicked.connect(window._discard_key_changes)
+    layout.addWidget(window.discard_keys_button, 4, 2, 1, 2)
     return card
 
 

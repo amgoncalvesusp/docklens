@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 
 from PyQt5 import QtWidgets
+import pandas as pd
 
 from docklens import batch_runner as br
 import docklens.main_window as main_window_module
@@ -53,6 +55,8 @@ def test_window_runs_filters_and_recomputes_keys(qtbot, fixture_path):
     residue = window._result.details[0].receptor_residue
     window.key_edit.setText(residue)
     window._key_text_changed()
+    assert window._result.key_residues == frozenset()
+    window.recalculate_keys_button.click()
     assert window._result.key_residues == frozenset({residue})
     assert window.detail_proxy.rowCount() > 0
     assert window.coverage_model.rowCount() == len(window._result.summaries)
@@ -234,8 +238,43 @@ def test_window_writes_vinalab_roundtrip_after_manifest_analysis(
     assert captured == [(manifest, window._result)]
     window.key_edit.setText("SER1A")
     window._key_text_changed()
+    assert len(captured) == 1
+    window.recalculate_keys_button.click()
     assert len(captured) == 2
     assert captured[-1] == (manifest, window._result)
+
+
+def test_chart_limit_keeps_all_ligands_in_tables_and_exports(
+    qtbot, multi_source_result, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    summary, detail = multi_source_result.summaries[0], multi_source_result.details[0]
+    summaries, details = [], []
+    for i in range(105):
+        identity = dict(ligand_id=f"L{i:03d}", source_id=f"S{i:03d}", pose_id=f"P{i:03d}")
+        summaries.append(replace(summary, **identity))
+        details.append(replace(detail, interaction_id=f"I{i:03d}", **identity))
+    result = replace(multi_source_result, summaries=tuple(summaries), details=tuple(details))
+    window._result = result
+    window._refresh_tables()
+    window.analytics_workspace.activate(1)
+    assert window._result is result
+    assert window.summary_model.rowCount() == 105
+    assert window.detail_model.rowCount() == 105
+    assert len(window.analytics_workspace._result.summaries) == 100
+    monkeypatch.setattr(window, "_choose_export_filter", lambda **kwargs: main_window_module.export.ExportFilter())
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *args: None)
+    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args: (_ for _ in ()).throw(AssertionError(args)))
+    prefix = tmp_path / "complete"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(prefix), ""))
+    window._export_csv()
+    csv = pd.read_csv(tmp_path / "complete_summary.csv")
+    assert len(csv) == 105
+    path = tmp_path / "complete.xlsx"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(path), ""))
+    window._export_xlsx()
+    assert len(pd.read_excel(path, sheet_name="Summary")) == 105
 
 
 def test_system_b_uses_the_same_shared_receptor_input_plan(

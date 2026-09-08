@@ -119,3 +119,19 @@ def test_difference_uncertainty_chart_labels_independent_b_minus_a_design():
     assert artifact.metadata["design"] == "independent B - A"
     assert artifact.metadata["multiplicity_adjustment"] == "none"
     assert "B - A" in artifact.figure.axes[0].get_xlabel()
+
+
+def test_timeline_display_limit_preserves_full_md_population_and_original_time():
+    matrix = pd.DataFrame(True, index=[f"f{i}" for i in range(150)],
+                          columns=pd.MultiIndex.from_tuples([("SER70", "hbond")]))
+    analysis = interaction_state_analysis(matrix, AnalysisContext(mode="md", time_step_ns=.5),
+                                          max_training_observations=100)
+    display_ids = [f"f{i}" for i in range(51, 150)]
+    timeline = build_state_timeline_chart(analysis, display_observation_ids=display_ids)
+    population = build_state_population_chart(analysis)
+    assert timeline.metadata["total_observations"] == 150
+    assert timeline.metadata["observations_displayed"] == 99
+    assert timeline.data["ordinal"].tolist() == list(range(51, 150))
+    assert timeline.data["time_ns"].iloc[0] == 25.5
+    assert population.metadata["population_denominator"] == 150
+    assert population.data["population_count"].sum() == 150

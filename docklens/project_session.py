@@ -158,6 +158,7 @@ class ProjectState:
     heatmap_group_by: str = "source"
     heatmap_feature_level: str = "residue_type"
     heatmap_top_n: int | None = 40
+    chart_ranking: str = "interaction_count"
 
     def __post_init__(self) -> None:
         threshold = float(self.state_threshold)
@@ -197,6 +198,8 @@ class ProjectState:
             raise ValueError("heatmap_group_by is not supported")
         if self.heatmap_feature_level not in {"residue_type", "residue"}:
             raise ValueError("heatmap_feature_level is not supported")
+        if self.chart_ranking not in {"interaction_count", "fingerprint_features"}:
+            raise ValueError("chart_ranking is not supported")
         if self.heatmap_top_n is not None:
             top_n = int(self.heatmap_top_n)
             if top_n < 1 or top_n > 10_000:
@@ -324,6 +327,7 @@ def methods_summary(project: ProjectState) -> str:
         "Primary chart scope: {primary_scope}.{comparison_scope}\n"
         "Observation labels: {label_name}.\n"
         "Heatmap: {heatmap_rows}; {heatmap_features}; {heatmap_limit}.\n"
+        "Chart ligand ranking: {chart_ranking}; at most 100 ligands in chart views.\n"
         "Interaction counting: one presence per observation, receptor residue, "
         "and interaction type.\n"
         "Fingerprint similarity: Jaccard/Tanimoto coefficient.\n"
@@ -352,6 +356,7 @@ def methods_summary(project: ProjectState) -> str:
         heatmap_rows=heatmap_rows,
         heatmap_features=heatmap_features,
         heatmap_limit=heatmap_limit,
+        chart_ranking=project.chart_ranking,
         threshold=project.state_threshold,
         iterations=project.bootstrap_iterations,
         block_size=block_size,
@@ -633,6 +638,7 @@ def _decode_document(
                 if payload.get("heatmap_top_n", 40) is None
                 else _strict_int(payload.get("heatmap_top_n", 40))
             ),
+            chart_ranking=str(payload.get("chart_ranking", "interaction_count")),
         )
     except ProjectIntegrityError:
         raise
@@ -672,6 +678,7 @@ def _project_to_payload(
         "heatmap_group_by": project.heatmap_group_by,
         "heatmap_feature_level": project.heatmap_feature_level,
         "heatmap_top_n": project.heatmap_top_n,
+        "chart_ranking": project.chart_ranking,
     }
 
 

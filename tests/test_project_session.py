@@ -227,6 +227,7 @@ def test_legacy_project_migrates_to_current_chart_defaults(
     manifest["project"].pop("heatmap_group_by", None)
     manifest["project"].pop("heatmap_feature_level", None)
     manifest["project"].pop("heatmap_top_n", None)
+    manifest["project"].pop("chart_ranking", None)
     members["manifest.json"] = json.dumps(manifest).encode("utf-8")
     legacy = tmp_path / "legacy.docklens"
     with zipfile.ZipFile(legacy, "w") as archive:
@@ -241,6 +242,7 @@ def test_legacy_project_migrates_to_current_chart_defaults(
     assert loaded.heatmap_group_by == "source"
     assert loaded.heatmap_feature_level == "residue_type"
     assert loaded.heatmap_top_n == 40
+    assert loaded.chart_ranking == "interaction_count"
 
 
 def test_methods_summary_discloses_counting_state_and_bootstrap_assumptions(tmp_path):
@@ -261,6 +263,18 @@ def test_methods_summary_discloses_counting_state_and_bootstrap_assumptions(tmp_
     assert "poses.mol2" in text
     assert "Observation labels: Uploaded file name" in text
     assert "Heatmap: individual observations" in text
+
+
+def test_chart_ranking_criterion_round_trips_and_is_disclosed(tmp_path):
+    source = tmp_path / "poses.mol2"
+    source.write_text("@<TRIPOS>MOLECULE\n", encoding="utf-8")
+    project = replace(_project(source), chart_ranking="fingerprint_features")
+    path = tmp_path / "ranking.docklens"
+    save_project(project, path)
+    assert load_project(path).chart_ranking == "fingerprint_features"
+    assert "fingerprint_features" in methods_summary(project)
+    with pytest.raises(ValueError, match="chart_ranking"):
+        replace(project, chart_ranking="arbitrary-score")
 
 
 def test_comparison_series_round_trip_and_methods_are_disclosed(tmp_path):

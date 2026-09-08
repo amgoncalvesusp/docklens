@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0 — 2026-09-07
+
+### Added
+
+- Explicit Recalculate and Discard changes controls for staged key-residue edits.
+- Chart ranking limited to the top 100 ligands, with selectable mean interaction
+  counts or mean distinct fingerprint features per pose and deterministic ties.
+- Visible chart scope and ranking disclosures, also included in figure exports.
+
+### Changed
+
+- Analytical figures are prepared on demand and redundant refreshes are avoided.
+- Complete table exports retain every analyzed ligand and pose regardless of
+  chart ranking. Limited figure data remain explicitly distinguished.
+
+### Fixed
+
+- Apply key-residue changes consistently to both comparison systems.
+- Preserve chain-unspecified residue selections when editing checkboxes.
+- Prevent saving/exporting pending parameters with previously calculated results.
+- Keep the host Qt event loop active when running an embedded smoke check.
+
+### Validation
+
+- 316 local tests passed with 83.63% branch-aware coverage; Ruff checks passed.
+- Synthetic GUI checks with 1,000 ligands retained all 3,000 poses while limiting
+  chart rendering to the selected top 100 ligands.
+
 ## 1.3.0 — 2026-08-26
 
 ### Added

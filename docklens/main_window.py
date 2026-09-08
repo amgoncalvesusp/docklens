@@ -4,7 +4,7 @@ main_window.py — PyQt5 desktop UI for DockLens.
 Load a file / list / folder, resolve ligand vs. receptor, detect interactions and
 show two sortable/filterable tables (Summary, Detail) with distinct per-type
 colouring. Key residues are editable as free text AND pickable from a checkbox
-list of the detected protein residues; counts recompute without re-detection.
+list of the detected protein residues; Recalculate applies drafts without re-detection.
 A scientific profile switches among legacy PLIP, LUNA, DSV-like and a
 conservative LUNA × DSV cross-profile. Export to CSV / XLSX. Reset starts fresh.
 """
@@ -32,6 +32,7 @@ from .ligand_selection import ligand_groups
 from .main_window_ui import build_main_window_ui
 from .project_controller import ProjectControllerMixin
 from .residue_keys import match_key_residues, parse_key_residues
+from .analysis_tasks import AnalysisTaskRunner
 
 INVENTOR = "Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA)"
 LOGGER = logging.getLogger(__name__)
@@ -136,6 +137,13 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self._project_stale = False
         self._syncing = False
         self._key_invalid_tokens = ()
+        self._pending_keys = frozenset()
+        self._key_draft_edited = False
+        self._key_tasks = AnalysisTaskRunner(
+            self, max_threads=1, clear_pending_on_invalidate=True
+        )
+        self._key_background_threshold = 25000
+        self._key_recalculation_running = False
         self.setStyleSheet(_STYLE)
         self._build_ui()
 
@@ -146,6 +154,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def _workspace_changed(self, index):
         if 0 <= index < len(self.workspace_buttons):
             self.workspace_buttons[index].setChecked(True)
+        self.analytics_workspace.activate(index)
 
     def _update_lens(self, residue):
         self.lens_residue.setText(residue or "No selection")
@@ -162,6 +171,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             "Structures (*.mol2 *.pdb *.pdbqt);;All files (*)",
         )
         if files:
+            self._cancel_key_recalculation()
             self._files = list(files)
             self._input_plan = plan_from_paths(files)
             self.analytics_workspace.clear_observation_series()
@@ -193,6 +203,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         )
 
     def _set_input_plan(self, plan, *, comparison=False):
+        self._cancel_key_recalculation()
         if not isinstance(plan, InputPlan):
             raise TypeError("plan must be an InputPlan")
         if comparison:
@@ -210,6 +221,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def _open_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select folder")
         if folder:
+            self._cancel_key_recalculation()
             self._files = [folder]
             self._input_plan = None
             self.analytics_workspace.clear_observation_series()
@@ -271,17 +283,20 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             comparison_selected,
         )
 
-    def _chart_scope_changed(self):
+    def _chart_scope_changed(self, *, refresh=True):
         if self._result is None:
             return
         workspace = self.analytics_workspace
         workspace.set_ligand_group(
-            self.primary_ligand_combo.currentData()
+            self.primary_ligand_combo.currentData(), refresh=False
         )
         workspace.set_ligand_group(
             self.comparison_ligand_combo.currentData(),
             comparison=True,
+            refresh=False,
         )
+        if refresh:
+            workspace.refresh()
         primary_group = next(
             (
                 group
@@ -350,6 +365,8 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             combo.blockSignals(False)
 
     def _load_comparison(self):
+        if self._result is not None and not self._require_applied_keys():
+            return
         dialog = InputPlanDialog(self, title="Select System B input plan")
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -374,6 +391,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             )
             return
         self._comparison_result = comparison
+        self._populate_residue_list()
         self._set_input_plan(plan, comparison=True)
         self.analytics_workspace.set_observation_series(
             None, comparison=True, refresh=False
@@ -504,6 +522,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         )
         return {
             "analysis_profile": self._analysis_profile(),
+            "chart_ranking": self.analytics_workspace.ranking_criterion,
             "hbond_preset": self._hbond_preset(),
             "primary_ligand_group": (
                 "all"
@@ -546,6 +565,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         }
 
     def _run(self):
+        self._cancel_key_recalculation()
         if not self._files:
             QtWidgets.QMessageBox.warning(
                 self, "No input", "Open a file or folder first."
@@ -578,6 +598,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
                 hbond_preset=self._hbond_preset(),
             )
         self._result = result
+        self._key_draft_edited = False
         self.dataset_context.setText(
             f"{len(result.summaries)} observation(s) · "
             f"{len(result.details)} raw interaction row(s)"
@@ -609,6 +630,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
 
     def load_manifest(self, manifest):
         """Load and immediately analyze an explicit DockingHub receptor/poses pair."""
+        self._cancel_key_recalculation()
         preset_index = self.preset_combo.findData(manifest.hbond_preset)
         if preset_index >= 0:
             self.preset_combo.setCurrentIndex(preset_index)
@@ -683,22 +705,24 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
     def _refresh_tables(self):
         if self._result is None:
             return
-        self.save_project_button.setEnabled(True)
+        if not self._key_draft_edited:
+            self._discard_key_changes()
         view = build_analysis_view(self._result, self._analysis_profile())
         self.summary_model.set_dataframe(export.summary_dataframe(view))
         self.coverage_model.set_dataframe(export.key_residue_coverage_dataframe(view))
         self.detail_model.set_dataframe(export.detail_dataframe(view))
-        self.analytics_workspace.set_result(view)
+        self.analytics_workspace.set_result(view, refresh=False)
         comparison_view = None
         if self._comparison_result is not None:
             comparison_view = build_analysis_view(
                 self._comparison_result, self._analysis_profile()
             )
-            self.analytics_workspace.set_comparison(comparison_view)
+            self.analytics_workspace.set_comparison(comparison_view, refresh=False)
         else:
-            self.analytics_workspace.set_comparison(None)
+            self.analytics_workspace.set_comparison(None, refresh=False)
         self._refresh_ligand_selectors(view, comparison_view)
-        self._chart_scope_changed()
+        self._chart_scope_changed(refresh=False)
+        self.analytics_workspace.refresh()
         self.lens_profile.setText(
             "Profile: %s\nCounting unit: one presence per observation, "
             "residue and interaction type"
@@ -706,6 +730,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         )
         self._update_lens(self.analytics_workspace.selected_residue)
         self._apply_filters()
+        self._update_key_status()
         if len(view.details) < 500:
             self.summary_view.resizeColumnsToContents()
             self.coverage_view.resizeColumnsToContents()
@@ -713,31 +738,53 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
 
     # ---- key residues: text field <-> checkbox list stay in sync ----
     def _populate_residue_list(self):
+        if not self._key_draft_edited:
+            self._discard_key_changes()
         self._syncing = True
         self.res_list.clear()
-        key_set = br.normalize_key_residues(self.key_edit.text())
-        for res in sorted(self._result.receptor_residues):
+        residues = self._result.receptor_residues
+        if self._comparison_result is not None:
+            residues = residues | self._comparison_result.receptor_residues
+        for res in sorted(residues):
             item = QtWidgets.QListWidgetItem(res)
             item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-            checked = res.upper() in key_set or res.rstrip("_").upper() in key_set
+            checked = bool(match_key_residues(
+                self._pending_keys, (res.rstrip("_").upper(),)
+            ).matched_keys)
             item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
             self.res_list.addItem(item)
         self._syncing = False
         self._update_key_status()
 
-    def _residue_checks_changed(self, _item):
+    def _residue_checks_changed(self, item):
         if self._syncing:
             return
-        checked = [
-            self.res_list.item(i).text()
-            for i in range(self.res_list.count())
-            if self.res_list.item(i).checkState() == QtCore.Qt.Checked
-        ]
+        concrete = item.text().rstrip("_").upper()
+        keys = self._pending_keys
+        if item.checkState() == QtCore.Qt.Checked:
+            keys = keys | {concrete}
+        else:
+            matched = match_key_residues(keys, (concrete,)).matched_keys
+            residues = tuple(self.res_list.item(i).text().rstrip("_").upper()
+                             for i in range(self.res_list.count()))
+            remaining = match_key_residues(matched, residues).matched_residues
+            keys = (keys - set(matched)) | (set(remaining) - {concrete})
         self._syncing = True
-        self.key_edit.setText(" ".join(checked))
+        self.key_edit.setText(" ".join(sorted(keys)))
         self._syncing = False
         self._key_invalid_tokens = ()
-        self._recompute_key()
+        self._key_text_edited()
+        self._sync_key_checkboxes()
+
+    def _key_text_edited(self, _text=None):
+        if self._syncing:
+            return
+        self._cancel_key_recalculation()
+        parsed = parse_key_residues(self.key_edit.text())
+        self._pending_keys = frozenset(parsed.keys)
+        self._key_invalid_tokens = parsed.invalid
+        self._key_draft_edited = True
+        self._update_key_status()
 
     def _key_text_changed(self):
         if self._syncing:
@@ -745,16 +792,61 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         parsed = parse_key_residues(self.key_edit.text())
         key_set = frozenset(parsed.keys)
         self._key_invalid_tokens = parsed.invalid
+        self._pending_keys = key_set
+        self._key_draft_edited = True
         self._syncing = True
         self.key_edit.setText(" ".join(parsed.keys))
+        self._syncing = False
+        self._sync_key_checkboxes()
+        self._update_key_status()
+
+    def _sync_key_checkboxes(self):
+        self._syncing = True
         for i in range(self.res_list.count()):
             it = self.res_list.item(i)
-            on = (
-                it.text().upper() in key_set or it.text().rstrip("_").upper() in key_set
-            )
+            on = bool(match_key_residues(
+                self._pending_keys, (it.text().rstrip("_").upper(),)
+            ).matched_keys)
             it.setCheckState(QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
         self._syncing = False
-        self._recompute_key()
+
+    @staticmethod
+    def _applied_keys(result):
+        if result is None:
+            return frozenset()
+        return result.key_residues or frozenset(result.parameters.key_residues)
+
+    def _keys_pending(self):
+        if self._result is None:
+            return False
+        applied = self._applied_keys(self._result)
+        draft_pending = self._key_draft_edited and (
+            self._pending_keys != applied or bool(self._key_invalid_tokens)
+        )
+        comparison_pending = self._comparison_result is not None and (
+            self._applied_keys(self._comparison_result) != applied
+        )
+        return draft_pending or comparison_pending
+
+    def _discard_key_changes(self):
+        self._cancel_key_recalculation()
+        self._pending_keys = self._applied_keys(self._result)
+        self._key_invalid_tokens = ()
+        self._key_draft_edited = False
+        self._syncing = True
+        self.key_edit.setText(" ".join(sorted(self._pending_keys)))
+        self._syncing = False
+        self._sync_key_checkboxes()
+        self._update_key_status()
+
+    def _require_applied_keys(self):
+        if not self._keys_pending():
+            return True
+        QtWidgets.QMessageBox.warning(
+            self, "Key residue changes pending",
+            "Recalculate or discard key residue changes before saving or exporting."
+        )
+        return False
 
     def _update_key_status(self):
         keys = tuple(sorted(br.normalize_key_residues(self.key_edit.text())))
@@ -782,14 +874,77 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             message += "."
         if self._key_invalid_tokens:
             message += " Invalid: " + ", ".join(self._key_invalid_tokens) + "."
+        pending = self._keys_pending()
+        if self._key_recalculation_running:
+            message += " Recalculating key residues…"
+        if pending:
+            message += " Changes pending — displayed results use the applied selection."
+        self.recalculate_keys_button.setEnabled(
+            pending and not self._key_invalid_tokens and not self._key_recalculation_running
+        )
+        self.discard_keys_button.setEnabled(
+            self._pending_keys != self._applied_keys(self._result)
+            or bool(self._key_invalid_tokens)
+        )
+        self.save_project_button.setEnabled(self._result is not None and not pending)
         self.key_status.setText(message)
 
     def _recompute_key(self):
         if self._result is None:
             self._update_key_status()
             return
-        self._result = br.recompute_key(self._result, self.key_edit.text())
+        if not self._keys_pending() or self._key_invalid_tokens or self._key_recalculation_running:
+            return
+        keys = tuple(sorted(self._pending_keys))
+        detail_count = len(self._result.details) + (
+            len(self._comparison_result.details) if self._comparison_result is not None else 0
+        )
+        if detail_count > self._key_background_threshold:
+            self._key_recalculation_running = True
+            self._update_key_status()
+            self._key_tasks.start(
+                self._calculate_key_results, self._result, self._comparison_result, keys,
+                on_success=self._apply_key_results,
+                on_error=self._key_recalculation_failed,
+                on_settled=self._key_recalculation_settled,
+            )
+            return
+        try:
+            results = self._calculate_key_results(self._result, self._comparison_result, keys)
+        except Exception:  # noqa: BLE001 - preserve both completed datasets
+            LOGGER.exception("Key residue recalculation failed")
+            self._key_recalculation_failed()
+            return
+        self._apply_key_results(results)
+
+    @staticmethod
+    def _calculate_key_results(primary, comparison, keys):
+        return (
+            br.recompute_key(primary, keys),
+            br.recompute_key(comparison, keys) if comparison is not None else None,
+        )
+
+    def _cancel_key_recalculation(self):
+        self._key_tasks.invalidate()
+        self._key_recalculation_running = False
+
+    def _key_recalculation_settled(self):
+        self._key_recalculation_running = False
+        self._update_key_status()
+
+    def _key_recalculation_failed(self, error_name=None):
+        if error_name:
+            LOGGER.error("Key residue recalculation failed: %s", error_name)
+        QtWidgets.QMessageBox.critical(
+            self, "Recalculation failed",
+            "The applied results were preserved. Check the key selection and try again."
+        )
+
+    def _apply_key_results(self, results):
+        self._result, self._comparison_result = results
+        self._key_draft_edited = False
         self._refresh_tables()
+        self._discard_key_changes()
         self._update_key_status()
         self._write_dockinghub_result(show_warning=False)
 
@@ -832,6 +987,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
 
     def _reset(self):
         """Clear everything for a fresh analysis."""
+        self._cancel_key_recalculation()
         self._files = []
         self._input_plan = None
         self._result = None
@@ -841,6 +997,8 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         self._launch_manifest = None
         self._syncing = True
         self._key_invalid_tokens = ()
+        self._pending_keys = frozenset()
+        self._key_draft_edited = False
         self.key_edit.clear()
         self.search_edit.clear()
         self.res_filter.clear()
@@ -951,6 +1109,8 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
         )
 
     def _require_result(self):
+        if not self._require_applied_keys():
+            return False
         if self._result is None or (
             not self._result.summaries and not self._result.input_qc
         ):
@@ -970,6 +1130,7 @@ class MainWindow(ProjectControllerMixin, QtWidgets.QMainWindow):
             self.nav_rail.setMaximumWidth(122 if compact else 172)
 
     def closeEvent(self, event):
+        self._key_tasks.wait_for_done()
         if hasattr(self, "analytics_workspace"):
             self.analytics_workspace.dispose()
         super().closeEvent(event)

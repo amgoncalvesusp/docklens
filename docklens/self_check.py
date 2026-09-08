@@ -42,9 +42,19 @@ def run_self_check():
 
     existing_app = QtWidgets.QApplication.instance()
     application = existing_app or QtWidgets.QApplication(["DockLens", "--self-check"])
+    quit_on_close = application.quitOnLastWindowClosed()
+    if existing_app is not None:
+        application.setQuitOnLastWindowClosed(False)
     window = MainWindow()
     window.show()
-    QtCore.QTimer.singleShot(0, window.close)
-    QtCore.QTimer.singleShot(0, application.quit)
-    application.exec_()
+    if existing_app is not None:
+        # A smoke check must not stop its caller's event loop.
+        application.processEvents()
+        window.close()
+        application.processEvents()
+        application.setQuitOnLastWindowClosed(quit_on_close)
+    else:
+        QtCore.QTimer.singleShot(0, window.close)
+        QtCore.QTimer.singleShot(0, application.quit)
+        application.exec_()
     return 0

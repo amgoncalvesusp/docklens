@@ -280,6 +280,7 @@ def test_chart_scope_filters_all_primary_graphs_by_uploaded_ligand_file(
 
     workspace = window.analytics_workspace
     assert workspace.residue_panel.artifact.metadata["total_observations"] == 2
+    workspace.activate(1)
     assert tuple(workspace._fingerprint_matrix.index) == (
         "S000001:P0001:R001",
         "S000001:P0002:R001",
@@ -299,6 +300,7 @@ def test_compare_chart_scopes_are_independent(
     qtbot.addWidget(window)
     window._result = multi_source_result
     window._comparison_result = multi_source_result
+    window._workspace_changed(2)
     window._refresh_tables()
 
     window.primary_ligand_combo.setCurrentIndex(
@@ -329,6 +331,7 @@ def test_chart_labels_can_be_chosen_before_run_and_changed_without_redetection(
         window.observation_label_combo.findData("file")
     )
     window._result = multi_source_result
+    window._workspace_changed(1)
     window._refresh_tables()
 
     assert window.observation_label_combo.currentData() == "file"
@@ -359,6 +362,7 @@ def test_interaction_heatmap_compares_all_sources_or_active_observations(
     window = MainWindow()
     qtbot.addWidget(window)
     window._result = multi_source_result
+    window._workspace_changed(1)
     window._refresh_tables()
     workspace = window.analytics_workspace
 
@@ -394,6 +398,7 @@ def test_explicit_md_series_refreshes_chart_labels_and_heatmap(
     window.observation_label_combo.setCurrentIndex(
         window.observation_label_combo.findData("index")
     )
+    window._workspace_changed(1)
     window._refresh_tables()
     series = ObservationSeries(
         mode="md",
@@ -449,6 +454,7 @@ def test_source_heatmap_export_metadata_discloses_full_dataset_scope(
     window = MainWindow()
     qtbot.addWidget(window)
     window._result = multi_source_result
+    window._workspace_changed(1)
     window._refresh_tables()
     window.primary_ligand_combo.setCurrentIndex(
         window.primary_ligand_combo.findData("S000001")
@@ -513,6 +519,7 @@ def test_retention_requires_explicit_docking_a_and_md_b_roles(
     qtbot.addWidget(window)
     result = br.run([fixture_path("minimal_complex.pdb")])
     window._result = result
+    window._workspace_changed(2)
     window._refresh_tables()
     workspace = window.analytics_workspace
     workspace.set_comparison(result)
@@ -574,6 +581,7 @@ def test_fingerprint_workspace_contains_pose_family_and_dynamic_state_tools(
     window = MainWindow()
     qtbot.addWidget(window)
     window._result = br.run([fixture_path("minimal_complex.pdb")])
+    window._workspace_changed(1)
     window._refresh_tables()
     workspace = window.analytics_workspace
 
@@ -731,6 +739,7 @@ def test_explicit_series_reaches_states_bootstrap_and_evidence(qtbot, fixture_pa
     workspace = AnalyticsWorkspace()
     qtbot.addWidget(workspace.fingerprint_page)
     workspace.set_mode("md")
+    workspace.activate(1)
     workspace.set_result(result)
     observation_id = result.summaries[0].pose_id
     series = ObservationSeries(

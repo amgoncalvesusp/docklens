@@ -121,11 +121,13 @@ def test_multiligand_file_is_split_without_splitting_multipose_ligand(
 ):
     first_summary = replace(
         multi_source_result.summaries[0],
-        ligand_id="PEP_pose_0001",
+        ligand_id="PEP",
+        source_molecule_name="PEP_pose_0001",
     )
     second_summary = replace(
         multi_source_result.summaries[1],
-        ligand_id="PEP_pose_0002",
+        ligand_id="PEP",
+        source_molecule_name="PEP_pose_0002",
     )
     third_summary = replace(
         multi_source_result.summaries[2],

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
@@ -16,6 +15,7 @@ from .observation_identity import (
     observation_labels,
 )
 from .results import RunResult
+from .chart_selection import ligand_identity
 
 if TYPE_CHECKING:
     from .observation_series import ObservationSeries
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 MAX_HEATMAP_ROWS = 400
 MAX_HEATMAP_CELLS = 120_000
 _GENERIC_LIGAND_LABELS = frozenset({"", "LIG", "RES", "RES1", "UNK", "UNL"})
-_POSE_SUFFIX = re.compile(r"(?i)(?:[_\-\s]*pose[_\-\s]*\d+)$")
 _CELL_COLUMNS = (
     "row_id",
     "row_label",
@@ -118,7 +117,7 @@ def _presence_catalog(
 
 def _canonical_ligand(summary) -> str:
     raw = str(summary.ligand_id or "").strip()
-    normalized = _POSE_SUFFIX.sub("", raw).strip()
+    normalized = raw
     if normalized.upper() not in _GENERIC_LIGAND_LABELS:
         return normalized
     return Path(str(summary.source_file or summary.source_id)).stem or "Ligand"
@@ -160,7 +159,7 @@ def _ligand_rows(
     for summary in result.summaries:
         source_key = _source_key(summary)
         ligand = _canonical_ligand(summary)
-        key = source_key, ligand
+        key = ligand_identity(summary)
         source_ligands.setdefault(source_key, set()).add(ligand)
         entry = grouped.setdefault(
             key,

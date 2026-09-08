@@ -34,15 +34,23 @@ class AnalysisTask(QtCore.QRunnable):
 class AnalysisTaskRunner(QtCore.QObject):
     """Own worker lifetimes and ignore results from invalidated UI contexts."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, max_threads=None, clear_pending_on_invalidate=False):
         super().__init__(parent)
         self._pool = QtCore.QThreadPool(self)
+        if max_threads is not None:
+            if int(max_threads) < 1:
+                raise ValueError("max_threads must be positive")
+            self._pool.setMaxThreadCount(int(max_threads))
+        self._clear_pending_on_invalidate = bool(clear_pending_on_invalidate)
         self._generation = 0
         self._serial = 0
         self._active = {}
 
     def invalidate(self):
         self._generation += 1
+        if self._clear_pending_on_invalidate:
+            # Running callables finish, but queued obsolete snapshots never start.
+            self._pool.clear()
         records = tuple(self._active.values())
         self._active.clear()
         for _task, _generation, _success, _error, on_settled in records:
@@ -68,11 +76,12 @@ class AnalysisTaskRunner(QtCore.QObject):
             on_error,
             on_settled,
         )
-        task.signals.finished.connect(self._finished)
-        task.signals.failed.connect(self._failed)
+        task.signals.finished.connect(self._finished, QtCore.Qt.QueuedConnection)
+        task.signals.failed.connect(self._failed, QtCore.Qt.QueuedConnection)
         self._pool.start(task)
         return token
 
+    @QtCore.pyqtSlot(int, object)
     def _finished(self, token, value):
         record = self._active.pop(token, None)
         if record is None:
@@ -83,6 +92,7 @@ class AnalysisTaskRunner(QtCore.QObject):
             if on_settled is not None:
                 on_settled()
 
+    @QtCore.pyqtSlot(int, str)
     def _failed(self, token, error_name):
         record = self._active.pop(token, None)
         if record is None:

@@ -13,6 +13,7 @@ from .dynamic_states import (
     state_transition_frame,
 )
 from .plotting import ChartArtifact, _empty_axis, _figure, _style_axis
+from .chart_selection import MAX_CHART_OBSERVATIONS
 
 
 _STATE_COLOURS = (
@@ -45,9 +46,15 @@ def _state_colour_map(state_ids):
 
 def build_state_timeline_chart(
     analysis: InteractionStateAnalysis,
+    *,
+    display_observation_ids=None,
 ) -> ChartArtifact:
     """Build an ordered MD-state timeline or docking-family ribbon."""
     data = state_assignment_frame(analysis)
+    total_rows = len(data)
+    if display_observation_ids is not None:
+        data = data[data["observation_id"].isin(display_observation_ids)]
+    data = data.iloc[:MAX_CHART_OBSERVATIONS].copy()
     figure = _figure(width=10.4, height=3.4)
     axis = figure.add_subplot(111)
     _style_axis(axis)
@@ -70,15 +77,14 @@ def build_state_timeline_chart(
                 0,
                 1,
             )
-            axis.imshow(
-                values,
-                aspect="auto",
-                interpolation="nearest",
-                cmap=cmap,
-                vmin=-0.5,
-                vmax=max(0.5, len(states) - 0.5),
-                extent=extent,
-            )
+            if len(data) < total_rows:
+                replicas = list(dict.fromkeys(data["replica_id"]))
+                axis.scatter(x_values, [replicas.index(r) for r in data["replica_id"]],
+                             c=[colours[state] for state in data["state_id"]], marker="s")
+                axis.set_yticks(range(len(replicas)), replicas)
+            else:
+                axis.imshow(values, aspect="auto", interpolation="nearest", cmap=cmap,
+                            vmin=-.5, vmax=max(.5, len(states)-.5), extent=extent)
             axis.set_xlabel("Simulation time (ns)")
             title = "Interaction-state timeline"
         else:
@@ -91,9 +97,10 @@ def build_state_timeline_chart(
                 vmax=max(0.5, len(states) - 0.5),
                 extent=(0, len(data), 0, 1),
             )
-            axis.set_xlabel("Docking pose order (not time)")
+            axis.set_xlabel("Displayed docking pose order (not time)")
             title = "Pose-family membership"
-        axis.set_yticks([])
+        if analysis.mode != "md" or len(data) == total_rows:
+            axis.set_yticks([])
         axis.grid(False)
         handles = [
             axis.scatter([], [], marker="s", color=colours[state], label=state)
@@ -121,6 +128,11 @@ def build_state_timeline_chart(
             "sampled": analysis.sampled,
             "training_observations": analysis.training_observations,
             "total_observations": analysis.total_observations,
+            "observations_displayed": len(data),
+            "observation_display_limit": MAX_CHART_OBSERVATIONS,
+            "observation_display_ids": tuple(data["observation_id"]),
+            "display_notice": (f"Timeline display: {len(data)} of {total_rows} observations. "
+                               "Original order/time/replica retained; populations and transitions use all selected observations."),
             "outlier_observations": len(analysis.outlier_observations),
         },
     )
@@ -289,6 +301,7 @@ def build_uncertainty_chart(
         )
         axis.set_yticks(positions, labels=labels)
         axis.set_xlim(0, 100)
+        data = ordered
     axis.set_xlabel("MD occupancy with confidence interval (%)")
     axis.set_title("Interaction occupancy uncertainty", loc="left")
     first = data.iloc[0] if not data.empty else None
@@ -364,6 +377,7 @@ def build_difference_uncertainty_chart(
         )
         axis.axvline(0, color=_INK, linewidth=0.9)
         axis.set_yticks(positions, labels=labels)
+        data = ordered.drop(columns="magnitude")
     axis.set_xlabel("MD occupancy difference B - A (percentage points)")
     axis.set_title("Differential occupancy uncertainty", loc="left")
     first = data.iloc[0] if not data.empty else None

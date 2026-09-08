@@ -14,6 +14,7 @@ from .analytics import (
     fingerprint_matrix,
     fingerprint_similarity,
     residue_type_prevalence,
+    observation_ids,
 )
 from .dynamic_plotting import (
     build_difference_uncertainty_chart,
@@ -42,6 +43,7 @@ from .observation_identity import (
     observation_labels,
 )
 from .plotting import (
+    annotate_chart_selection,
     ChartArtifact,
     build_comparison_chart,
     build_fingerprint_chart,
@@ -51,13 +53,14 @@ from .plotting import (
     build_similarity_chart,
 )
 from .results import RunResult, make_result
+from .chart_selection import RANKING_CRITERIA, select_chart_ligands
 from .uncertainty import (
     block_bootstrap_difference,
     block_bootstrap_occupancy,
 )
 
 
-_MAX_SIMILARITY_OBSERVATIONS = 300
+_MAX_SIMILARITY_OBSERVATIONS = 100
 
 class ChartPanel(QtWidgets.QWidget):
     """Replaceable Matplotlib canvas with a safe empty state."""
@@ -65,6 +68,7 @@ class ChartPanel(QtWidgets.QWidget):
     def __init__(self, minimum_height=360, parent=None):
         super().__init__(parent)
         self.artifact: ChartArtifact | None = None
+        self._base_minimum_height = minimum_height
         self._canvas = None
         self._layout = QtWidgets.QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -73,6 +77,12 @@ class ChartPanel(QtWidgets.QWidget):
     def set_artifact(self, artifact: ChartArtifact):
         self._dispose_canvas()
         self.artifact = artifact
+        row_count = (artifact.metadata.get("rows_displayed", 0)
+                     if artifact.kind == "interaction-comparison-heatmap" else
+                     artifact.metadata.get("total_observations", 0)
+                     if artifact.kind in {"interaction-fingerprint", "fingerprint-similarity"} else 0)
+        self.setMinimumHeight(max(self._base_minimum_height, 18 * row_count + 260))
+        self.setMinimumWidth(18 * row_count + 260 if artifact.kind == "fingerprint-similarity" else 0)
         self._canvas = FigureCanvasQTAgg(artifact.figure)
         self._canvas.setFocusPolicy(QtCore.Qt.StrongFocus)
         self._canvas.setMinimumHeight(self.minimumHeight())
@@ -84,6 +94,7 @@ class ChartPanel(QtWidgets.QWidget):
         if canvas is None:
             return
         self._canvas = None
+        canvas._draw_pending = False
         self._layout.removeWidget(canvas)
         canvas.close()
         canvas.setParent(None)
@@ -138,6 +149,11 @@ class AnalyticsWorkspace(QtCore.QObject):
         self._series: ObservationSeries | None = None
         self._comparison_series: ObservationSeries | None = None
         self._mode = "docking"
+        self._active_index = 0
+        self._dirty_pages = {0, 1, 2}
+        self._rendering_page = None
+        self._selection_cache = {}
+        self._ranking_criterion = "interaction_count"
         self.bootstrap_seed = 2026
         self.confidence_level = 0.95
         self._selected_residue = ""
@@ -152,11 +168,42 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.residue_page = self._build_residue_page()
         self.fingerprint_page = self._build_fingerprint_page()
         self.compare_page = self._build_compare_page()
+        self.residue_barcode_panel = self.fingerprint_panel
         self.scroll_areas = (
             self.residue_page,
             self.fingerprint_page,
             self.compare_page,
         )
+        self.refresh()
+
+    def _ranking_controls(self):
+        box = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(box)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("Chart ranking (up to 100 ligands):"))
+        selector = QtWidgets.QComboBox()
+        for key, label in RANKING_CRITERIA.items():
+            selector.addItem(label, key)
+        selector.currentIndexChanged.connect(lambda _index: self.set_ranking_criterion(selector.currentData()))
+        self._ranking_selectors = [*getattr(self, "_ranking_selectors", []), selector]
+        row.addWidget(selector)
+        layout.addLayout(row)
+        notice = QtWidgets.QLabel()
+        notice.setWordWrap(True)
+        self._selection_notices = [*getattr(self, "_selection_notices", []), notice]
+        layout.addWidget(notice)
+        return box
+
+    def set_ranking_criterion(self, criterion):
+        if criterion not in RANKING_CRITERIA:
+            raise ValueError("unknown chart ranking criterion")
+        if criterion == self._ranking_criterion:
+            return
+        self._ranking_criterion = criterion
+        for selector in self._ranking_selectors:
+            selector.blockSignals(True)
+            selector.setCurrentIndex(selector.findData(criterion))
+            selector.blockSignals(False)
         self.refresh()
 
     def _build_residue_page(self):
@@ -165,6 +212,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(24, 20, 24, 24)
         layout.setSpacing(16)
+        layout.addWidget(self._ranking_controls())
         layout.addWidget(
             _heading(
                 "Interaction profile by residue",
@@ -186,9 +234,6 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.residue_panel = ChartPanel(minimum_height=390)
         self.residue_panel.setObjectName("analysisField")
         layout.addWidget(self.residue_panel)
-        self.residue_barcode_panel = ChartPanel(minimum_height=360)
-        self.residue_barcode_panel.setObjectName("analysisField")
-        layout.addWidget(self.residue_barcode_panel)
         return _scrollable(content)
 
     def _build_fingerprint_page(self):
@@ -197,6 +242,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(24, 20, 24, 24)
         layout.setSpacing(16)
+        layout.addWidget(self._ranking_controls())
         layout.addWidget(
             _heading(
                 "Interaction fingerprints",
@@ -315,6 +361,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(24, 20, 24, 24)
         layout.setSpacing(16)
+        layout.addWidget(self._ranking_controls())
         layout.addWidget(
             _heading(
                 "Compare interaction evidence",
@@ -387,7 +434,8 @@ class AnalyticsWorkspace(QtCore.QObject):
     def selected_residue(self):
         return self._selected_residue
 
-    def set_result(self, result: RunResult | None):
+    def set_result(self, result: RunResult | None, *, refresh=True):
+        self._dirty_pages.update((0, 1, 2))
         self._source_result = result or make_result()
         valid_groups = {
             group.key for group in ligand_groups(self._source_result)
@@ -397,9 +445,11 @@ class AnalyticsWorkspace(QtCore.QObject):
         self._result = subset_run_result(
             self._source_result, self._ligand_group
         )
-        self.refresh()
+        if refresh:
+            self.refresh()
 
-    def set_comparison(self, result: RunResult | None):
+    def set_comparison(self, result: RunResult | None, *, refresh=True):
+        self._dirty_pages.add(2)
         self._source_comparison = result
         if result is None:
             self._comparison_series = None
@@ -412,14 +462,17 @@ class AnalyticsWorkspace(QtCore.QObject):
             self._comparison = subset_run_result(
                 result, self._comparison_ligand_group
             )
-        self.refresh_compare()
+        if refresh:
+            self.refresh()
 
     def set_ligand_group(
         self,
         group_key: str | None,
         *,
         comparison: bool = False,
+        refresh: bool = True,
     ):
+        self._dirty_pages.update((2,) if comparison else (0, 1, 2))
         if comparison:
             if self._source_comparison is None:
                 self._comparison_ligand_group = None
@@ -429,11 +482,13 @@ class AnalyticsWorkspace(QtCore.QObject):
                     self._source_comparison, group_key
                 )
                 self._comparison_ligand_group = group_key
-            self.refresh_compare()
+            if refresh:
+                self.refresh()
             return
         self._result = subset_run_result(self._source_result, group_key)
         self._ligand_group = group_key
-        self.refresh()
+        if refresh:
+            self.refresh()
 
     @property
     def observation_label_mode(self) -> str:
@@ -558,9 +613,9 @@ class AnalyticsWorkspace(QtCore.QObject):
         explicit = (
             self._comparison_series if comparison else self._series
         )
-        observation_ids = fingerprint_matrix(result).index
+        active_ids = observation_ids(result)
         if explicit is not None:
-            return subset_observation_series(explicit, observation_ids)
+            return subset_observation_series(explicit, active_ids)
         return default_md_series_for_result(
             result,
             time_step_ns=self.time_step_spin.value(),
@@ -573,87 +628,85 @@ class AnalyticsWorkspace(QtCore.QObject):
         self._selected_residue = residue
         self.residueSelected.emit(residue)
 
+    @property
+    def ranking_criterion(self):
+        return self._ranking_criterion
+
+    def _prepare_scope(self):
+        for comparison in (False, True):
+            source = self._source_comparison if comparison else self._source_result
+            group = self._comparison_ligand_group if comparison else self._ligand_group
+            cached = self._selection_cache.get(comparison)
+            if (cached is None or cached[0] is not source
+                    or cached[1:3] != (group, self._ranking_criterion)):
+                scoped = subset_run_result(source, group) if source is not None else make_result()
+                cached = (source, group, self._ranking_criterion,
+                          select_chart_ligands(scoped, self._ranking_criterion))
+                self._selection_cache[comparison] = cached
+            if comparison:
+                self._comparison_selection = cached[3]
+                self._comparison = cached[3].result if source is not None else None
+            else:
+                self._selection = cached[3]
+                self._result = cached[3].result
+        for notice in self._selection_notices:
+            notice.setText(self._selection.note + " Mean per saved frame in MD mode. "
+                           "Observation charts show at most 100 observations; all selected poses/frames "
+                           "remain in aggregate denominators.")
+
     def refresh(self):
         self._tasks.invalidate()
-        prevalence = residue_type_prevalence(self._result)
+        self._dirty_pages.update((0, 1, 2))
+        self._prepare_scope()
+        self.activate(self._active_index)
+
+    def activate(self, index):
+        """Materialize only the requested page; repeated navigation reuses figures."""
+        self._active_index = index
+        if index not in self._dirty_pages or index not in (0, 1, 2):
+            return
+        self._prepare_scope()
+        self._rendering_page = index
+        try:
+            if index == 0:
+                artifact = build_residue_chart(self._result, mode=self._mode, selection=self._selection)
+                self.residue_panel.set_artifact(artifact)
+                self._refresh_residue_selector()
+            elif index == 1:
+                self._render_fingerprints()
+            else:
+                self.refresh_compare()
+            self._dirty_pages.discard(index)
+        finally:
+            self._rendering_page = None
+        artifact = (self.residue_panel.artifact if index == 0 else
+                    self.fingerprint_panel.artifact if index == 1 else self.compare_panel.artifact)
+        self.artifactChanged.emit(artifact)
+
+    def _render_fingerprints(self):
         self._fingerprint_matrix = fingerprint_matrix(self._result)
-        label_series = (
-            self._active_md_series() if self._mode == "md" else None
-        )
-        if label_series is not None:
-            self._fingerprint_matrix = self._fingerprint_matrix.loc[
-                list(label_series.observation_ids)
-            ]
+        series = self._active_md_series() if self._mode == "md" else None
+        if series is not None:
+            self._fingerprint_matrix = self._fingerprint_matrix.loc[list(series.observation_ids)]
         self._observation_labels = observation_labels(
-            self._result,
-            mode=self._mode,
-            label_mode=self._observation_label_mode,
-            series=label_series,
-        )
-        similarity_matrix = self._fingerprint_matrix
-        if len(similarity_matrix.index) > _MAX_SIMILARITY_OBSERVATIONS:
-            last = len(similarity_matrix.index) - 1
-            indices = tuple(
-                round(
-                    position * last
-                    / (_MAX_SIMILARITY_OBSERVATIONS - 1)
-                )
-                for position in range(_MAX_SIMILARITY_OBSERVATIONS)
-            )
-            similarity_matrix = similarity_matrix.iloc[list(indices)]
-            self.fingerprint_status.setText(
-                f"Barcode: {len(self._fingerprint_matrix.index)} observations · "
-                f"similarity/clustering: {_MAX_SIMILARITY_OBSERVATIONS} "
-                "evenly sampled observations"
-            )
-        else:
-            self.fingerprint_status.setText(
-                f"{len(self._fingerprint_matrix.index)} observations · "
-                "similarity and clustering use the complete matrix"
-            )
-        self._similarity_source_matrix = similarity_matrix
-        self._fingerprint_similarity = fingerprint_similarity(
-            self._similarity_source_matrix
-        )
-        residue_artifact = build_residue_chart(
-            self._result, mode=self._mode, prevalence=prevalence
-        )
-        barcode_artifact = build_fingerprint_chart(
-            self._result,
-            mode=self._mode,
-            matrix=self._fingerprint_matrix,
-            observation_labels=self._observation_labels,
-        )
-        self.residue_panel.set_artifact(residue_artifact)
-        self.residue_barcode_panel.set_artifact(barcode_artifact)
-        self.fingerprint_panel.set_artifact(
-            build_fingerprint_chart(
-                self._result,
-                mode=self._mode,
-                matrix=self._fingerprint_matrix,
-                observation_labels=self._observation_labels,
-            )
-        )
-        similarity_labels = {
-            observation_id: self._observation_labels.get(
-                str(observation_id), str(observation_id)
-            )
-            for observation_id in self._similarity_source_matrix.index
-        }
-        self.similarity_panel.set_artifact(
-            build_similarity_chart(
-                self._result,
-                matrix=self._similarity_source_matrix,
-                similarity=self._fingerprint_similarity,
-                observation_labels=similarity_labels,
-            )
-        )
+            self._result, mode=self._mode, label_mode=self._observation_label_mode, series=series)
+        displayed = frozenset(self._selection.display_observation_ids)
+        self._similarity_source_matrix = self._fingerprint_matrix.loc[
+            [i for i in self._fingerprint_matrix.index if i in displayed]]
+        self._fingerprint_similarity = fingerprint_similarity(self._similarity_source_matrix)
+        self.fingerprint_status.setText(
+            f"Observation display: {len(displayed)} of {len(self._fingerprint_matrix.index)}. "
+            "Highest-ranked pose per selected ligand, then original-order fill; "
+            "not a random sample or an affinity ranking.")
+        self.fingerprint_panel.set_artifact(build_fingerprint_chart(
+            self._result, mode=self._mode, matrix=self._similarity_source_matrix,
+            observation_labels=self._observation_labels, selection=self._selection))
+        self.similarity_panel.set_artifact(build_similarity_chart(
+            self._result, matrix=self._similarity_source_matrix, similarity=self._fingerprint_similarity,
+            observation_labels=self._observation_labels, selection=self._selection))
         self.refresh_heatmap()
-        self._refresh_residue_selector()
         self._refresh_clusters()
         self._refresh_states()
-        self.refresh_compare()
-        self.artifactChanged.emit(residue_artifact)
 
     def _refresh_residue_selector(self):
         residues = sorted(
@@ -709,12 +762,24 @@ class AnalyticsWorkspace(QtCore.QObject):
     def refresh_heatmap(self):
         if not hasattr(self, "interaction_heatmap_panel"):
             return
+        if self._active_index != 1 and self._rendering_page != 1:
+            self._dirty_pages.add(1)
+            return
         group_by = self.heatmap_group_combo.currentData() or "source"
-        result = self._source_result if group_by == "source" else self._result
+        if group_by == "source":
+            cached = self._selection_cache.get("heatmap")
+            if cached is None or cached[0] is not self._source_result or cached[1] != self._ranking_criterion:
+                cached = (self._source_result, self._ranking_criterion,
+                          select_chart_ligands(self._source_result, self._ranking_criterion))
+                self._selection_cache["heatmap"] = cached
+            selection = cached[2]
+        else:
+            selection = self._selection
+        result = selection.result
         if self._mode == "md":
             if group_by == "source":
                 series = (
-                    self._series
+                    subset_observation_series(self._series, observation_ids(result))
                     if self._series is not None
                     else default_md_series_for_result(
                         result,
@@ -735,10 +800,11 @@ class AnalyticsWorkspace(QtCore.QObject):
             mode=self._mode,
             series=series,
             top_n=self.heatmap_top_combo.currentData(),
+            selection=selection,
         )
         self.interaction_heatmap_panel.set_artifact(artifact)
         scope = (
-            "all loaded ligand/file groups"
+            "ranked ligands from all loaded sources"
             if group_by == "source"
             else "active chart scope"
         )
@@ -752,6 +818,7 @@ class AnalyticsWorkspace(QtCore.QObject):
             or artifact.metadata["hard_feature_limit_applied"]
         )
         self.heatmap_status.setText(
+            selection.note + "\n" +
             f"{artifact.metadata['rows_displayed']} row(s) · "
             f"{artifact.metadata['features_displayed']} feature(s) · "
             f"{artifact.metadata['total_observations']} {unit} · {scope}. "
@@ -769,6 +836,9 @@ class AnalyticsWorkspace(QtCore.QObject):
     def _refresh_states(self):
         if not hasattr(self, "state_threshold_spin"):
             return
+        if self._active_index != 1 and self._rendering_page != 1:
+            self._dirty_pages.add(1)
+            return
         context = AnalysisContext(
             mode=self._mode,
             time_step_ns=self.time_step_spin.value(),
@@ -785,10 +855,12 @@ class AnalyticsWorkspace(QtCore.QObject):
             ),
         )
         self.state_population_panel.set_artifact(
-            build_state_population_chart(self.state_analysis)
+            annotate_chart_selection(build_state_population_chart(self.state_analysis), self._selection)
         )
         self.state_timeline_panel.set_artifact(
-            build_state_timeline_chart(self.state_analysis)
+            annotate_chart_selection(build_state_timeline_chart(
+                self.state_analysis, display_observation_ids=self._selection.display_observation_ids
+            ), self._selection)
         )
         temporal = self._mode == "md"
         self.dynamic_group_box.setTitle(
@@ -819,7 +891,7 @@ class AnalyticsWorkspace(QtCore.QObject):
             )
         if temporal:
             self.transition_panel.set_artifact(
-                build_transition_chart(self.state_analysis)
+                annotate_chart_selection(build_transition_chart(self.state_analysis), self._selection)
             )
         self.uncertainty_panel.set_artifact(
             build_uncertainty_chart(pd.DataFrame())
@@ -938,7 +1010,7 @@ class AnalyticsWorkspace(QtCore.QObject):
 
     def _uncertainty_ready(self, intervals):
         self.uncertainty_panel.set_artifact(
-            build_uncertainty_chart(intervals)
+            annotate_chart_selection(build_uncertainty_chart(intervals), self._selection)
         )
         self.dynamic_tabs.setCurrentIndex(3)
 
@@ -954,14 +1026,20 @@ class AnalyticsWorkspace(QtCore.QObject):
         self.compute_uncertainty_button.setEnabled(self._mode == "md")
 
     def refresh_compare(self):
+        if self._active_index != 2 and self._rendering_page != 2:
+            self._dirty_pages.add(2)
+            return
+        self._prepare_scope()
         self._tasks.invalidate()
         comparison = self._comparison or make_result()
         compare_artifact = build_comparison_chart(
-            self._result, comparison, mode=self._mode
+            self._result, comparison, mode=self._mode,
+            selection=self._selection, comparison_selection=self._comparison_selection,
         )
         self.compare_panel.set_artifact(compare_artifact)
         retention_artifact = build_retention_chart(
-            self._result, comparison
+            self._result, comparison,
+            selection=self._selection, comparison_selection=self._comparison_selection,
         )
         self.retention_panel.set_artifact(retention_artifact)
         roles_allow_retention = (
@@ -1056,7 +1134,8 @@ class AnalyticsWorkspace(QtCore.QObject):
         ):
             return
         self.compare_uncertainty_panel.set_artifact(
-            build_difference_uncertainty_chart(intervals)
+            annotate_chart_selection(build_difference_uncertainty_chart(intervals), self._selection,
+                                     comparison=self._comparison_selection)
         )
         self.compare_uncertainty_panel.setVisible(True)
 
@@ -1076,6 +1155,7 @@ class AnalyticsWorkspace(QtCore.QObject):
         )
 
     def current_artifact(self, workspace_index):
+        self.activate(workspace_index)
         if workspace_index == 0:
             return self.residue_panel.artifact
         if workspace_index == 1:
@@ -1107,6 +1187,10 @@ class AnalyticsWorkspace(QtCore.QObject):
 
     def exportable_artifacts(self):
         """Return each unique chart generated for the current analysis state."""
+        current = self._active_index
+        for index in (0, 1, 2):
+            self.activate(index)
+        self._active_index = current
         panels = [
             ("residue-profile", self.residue_panel),
             ("interaction-heatmap", self.interaction_heatmap_panel),
@@ -1172,7 +1256,12 @@ class AnalyticsWorkspace(QtCore.QObject):
     def evidence_text(self, residue):
         if not residue:
             return "No residue selected."
-        data = self.residue_panel.artifact.data
+        self._prepare_scope()
+        cached = getattr(self, "_prevalence_cache", None)
+        if cached is None or cached[0] is not self._result:
+            cached = (self._result, residue_type_prevalence(self._result))
+            self._prevalence_cache = cached
+        data = cached[1]
         rows = data[data["receptor_residue"] == residue]
         if rows.empty:
             return f"{residue}: no evidence in the current profile."

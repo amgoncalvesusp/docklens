@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
+from inspect import signature
+from textwrap import fill
 from types import MappingProxyType
 from typing import Mapping
 
@@ -21,6 +24,8 @@ from .analytics import (
 from .interaction_core import color_hex
 from .interaction_heatmap import build_interaction_heatmap_data
 from .results import RunResult
+from .chart_selection import select_chart_ligands
+from .ligand_selection import subset_observation_series
 
 
 _INK = "#12202F"
@@ -43,6 +48,77 @@ class ChartArtifact:
         object.__setattr__(
             self, "metadata", MappingProxyType(dict(self.metadata))
         )
+
+
+def annotate_chart_selection(artifact, selection, *, observation_display=False, comparison=None):
+    """Attach the chart-only scope to both exported pixels and sidecar metadata."""
+    note = selection.note
+    if artifact.metadata.get("display_notice"):
+        note += "\n" + artifact.metadata["display_notice"]
+    if comparison is not None:
+        note = "A: " + note + "\nB: " + comparison.note
+    metadata = {**artifact.metadata, "chart_selection": dict(selection.metadata)}
+    if observation_display:
+        note += (f"\nObservation display: {len(selection.display_observation_ids)} of "
+                 f"{selection.metadata['selected_observations']}; highest-ranked pose per ligand, "
+                 "then original-order fill. Aggregate denominators use all selected observations.")
+    if artifact.kind == "interaction-fingerprint" and artifact.metadata.get("features_before_limit", 0) > artifact.metadata.get("features_displayed", 0):
+        note += (f"\nFeatures displayed: {artifact.metadata['features_displayed']} of "
+                 f"{artifact.metadata['features_before_limit']}; ranked by display-observation prevalence, "
+                 "ties by residue/type. Similarity uses all fingerprint features.")
+    elif artifact.kind == "interaction-comparison-heatmap":
+        note += (f"\nFeatures displayed: {artifact.metadata['features_displayed']} of "
+                 f"{artifact.metadata['features_before_limit']}; {artifact.metadata['feature_ranking']}.")
+    if comparison is not None:
+        metadata["comparison_chart_selection"] = dict(comparison.metadata)
+    metadata["selection_notice"] = note
+    caption = "\n".join(fill(line, width=max(65, int(artifact.figure.get_figwidth() * 11)))
+                        for line in note.splitlines())
+    metadata["selection_notice"] = note
+    caption_points = len(caption.splitlines()) * 12 + 12
+    caption_height = min(.40, .02 + caption_points / (artifact.figure.get_figheight() * 72))
+    artifact.figure.set_layout_engine("constrained", rect=(0, caption_height, 1, 1-caption_height))
+    artifact.figure.text(.02, .02, caption, fontsize=9, color=_MUTED, va="bottom")
+    return ChartArtifact(artifact.kind, artifact.figure, artifact.data, metadata)
+
+
+def _ranked_chart(*, observations=False, comparison=False):
+    """Reduce input before analytics, matrix allocation or figure construction."""
+    def decorate(builder):
+        call_signature = signature(builder)
+        names = tuple(call_signature.parameters)
+        @wraps(builder)
+        def build(*args, **kwargs):
+            criterion = kwargs.pop("ranking_criterion", "interaction_count")
+            selection = kwargs.pop("selection", None)
+            other = kwargs.pop("comparison_selection", None)
+            bound = call_signature.bind(*args, **kwargs)
+            options = bound.arguments
+            result = options[names[0]]
+            selection = selection or select_chart_ligands(result, criterion)
+            if comparison:
+                other = other or select_chart_ligands(options[names[1]], criterion)
+                options[names[1]] = other.result
+            limited = observations or options.get("group_by") == "observation"
+            selected = selection.observation_result() if limited else selection.result
+            ids = {s.pose_id for s in selected.summaries} | {d.pose_id for d in selected.details}
+            options[names[0]] = selected
+            if options.get("matrix") is not None:
+                matrix = options["matrix"]
+                options["matrix"] = matrix.loc[[i for i in matrix.index if i in ids]]
+            if options.get("similarity") is not None:
+                similarity = options["similarity"]
+                indices = [i for i in similarity.index if i in ids]
+                options["similarity"] = similarity.loc[indices, indices]
+            if options.get("series") is not None:
+                options["series"] = subset_observation_series(options["series"], ids)
+            if "prevalence" in options and len(result.summaries) != len(selected.summaries):
+                options["prevalence"] = None
+            artifact = builder(*bound.args, **bound.kwargs)
+            return annotate_chart_selection(artifact, selection,
+                                            observation_display=limited, comparison=other)
+        return build
+    return decorate
 
 
 def _figure(width=10.0, height=5.4) -> Figure:
@@ -78,6 +154,7 @@ def _empty_axis(axis, message):
     axis.set_yticks([])
 
 
+@_ranked_chart()
 def build_residue_chart(
     result: RunResult,
     *,
@@ -145,6 +222,7 @@ def build_residue_chart(
             frameon=False,
             fontsize=8,
         )
+        data = selected
     axis.set_xlabel(label)
     axis.set_title("Interaction profile by receptor residue", loc="left")
     total = len({summary.pose_id for summary in result.summaries})
@@ -200,6 +278,7 @@ def _fingerprint_long(
     )
 
 
+@_ranked_chart(observations=True)
 def build_fingerprint_chart(
     result: RunResult,
     *,
@@ -215,8 +294,13 @@ def build_fingerprint_chart(
         if matrix is not None
         else fingerprint_matrix(result)
     )
+    features_before_limit = len(matrix.columns)
+    if features_before_limit > 40:
+        counts = matrix.sum(axis=0)
+        columns = sorted(matrix.columns, key=lambda feature: (-int(counts[feature]), feature))[:40]
+        matrix = matrix.loc[:, columns]
     data = _fingerprint_long(matrix, observation_labels)
-    figure = _figure(width=10.8, height=5.7)
+    figure = _figure(width=12, height=max(5.7, .22 * len(matrix.index) + 3))
     axis = figure.add_subplot(111)
     _style_axis(axis)
     if matrix.empty or matrix.shape[1] == 0:
@@ -235,7 +319,7 @@ def build_fingerprint_chart(
             interpolation="nearest",
         )
         feature_labels = [
-            f"{residue}\n{kind}" for residue, kind in matrix.columns
+            f"{residue} · {kind}" for residue, kind in matrix.columns
         ]
         axis.set_xticks(np.arange(len(feature_labels)), labels=feature_labels)
         axis.tick_params(axis="x", labelrotation=90, labelsize=7)
@@ -263,11 +347,16 @@ def build_fingerprint_chart(
             "mode": mode,
             "total_observations": len(matrix.index),
             "total_features": len(matrix.columns),
+            "features_before_limit": features_before_limit,
+            "features_displayed": len(matrix.columns),
+            "feature_display_limit": 40,
+            "feature_ranking": "display-observation prevalence descending, then residue/type ascending",
             "counting_unit": "binary presence per observation × feature",
         },
     )
 
 
+@_ranked_chart(observations=True)
 def build_similarity_chart(
     result: RunResult,
     *,
@@ -315,7 +404,8 @@ def build_similarity_chart(
             "tanimoto_similarity",
         ],
     )
-    figure = _figure(width=7.2, height=6.2)
+    side = max(7.2, .22 * len(similarity.index) + 3)
+    figure = _figure(width=side, height=side)
     axis = figure.add_subplot(111)
     _style_axis(axis)
     if similarity.empty:
@@ -358,6 +448,7 @@ def build_similarity_chart(
     )
 
 
+@_ranked_chart()
 def build_interaction_heatmap_chart(
     result: RunResult,
     *,
@@ -379,7 +470,7 @@ def build_interaction_heatmap_chart(
         series=series,
         top_n=top_n,
     )
-    height = min(12.0, max(4.8, 0.26 * len(heatmap.matrix.index) + 2.8))
+    height = max(4.8, 0.24 * len(heatmap.matrix.index) + 3)
     figure = _figure(width=11.2, height=height)
     axis = figure.add_subplot(111)
     _style_axis(axis)
@@ -401,7 +492,7 @@ def build_interaction_heatmap_chart(
         )
         axis.tick_params(axis="x", labelrotation=90, labelsize=7)
         row_labels = heatmap.matrix.index.tolist()
-        tick_step = max(1, int(np.ceil(len(row_labels) / 60)))
+        tick_step = 1 if len(row_labels) <= 100 else int(np.ceil(len(row_labels) / 100))
         tick_positions = np.arange(0, len(row_labels), tick_step)
         axis.set_yticks(
             tick_positions,
@@ -435,10 +526,11 @@ def build_interaction_heatmap_chart(
 
 def _feature_label(feature) -> str:
     if isinstance(feature, tuple):
-        return "\n".join(str(value) for value in feature)
+        return " · ".join(str(value) for value in feature)
     return str(feature)
 
 
+@_ranked_chart(comparison=True)
 def build_comparison_chart(
     system_a: RunResult, system_b: RunResult, *, mode: str = "docking"
 ) -> ChartArtifact:
@@ -472,6 +564,7 @@ def build_comparison_chart(
         )
         axis.axvline(0, color=_INK, linewidth=0.9)
         axis.set_yticks(np.arange(len(values)), labels=labels)
+        data = ordered.drop(columns="magnitude")
     measure = "prevalence" if mode == "docking" else "occupancy"
     axis.set_xlabel(f"Δ {measure} (B − A, percentage points)")
     axis.set_title("Differential interaction evidence", loc="left")
@@ -491,6 +584,7 @@ def build_comparison_chart(
     )
 
 
+@_ranked_chart(comparison=True)
 def build_retention_chart(
     docking: RunResult,
     md: RunResult,

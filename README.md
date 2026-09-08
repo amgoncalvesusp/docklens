@@ -17,6 +17,31 @@ conservative LUNA × DSV cross-profile. DockLens has **no PyMOL dependency**.
 
 **Inventor:** Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
 
+## Release 1.4.0
+
+Key-residue edits are staged until **Recalculate** is pressed. One application
+updates both systems without repeating molecular detection. **Discard changes**
+restores the applied selection. Save and export require an applied, consistent
+state; pending selections are never silently described as calculated results.
+
+Charts display at most **100 top-ranked ligands**, independently for each system.
+Choose mean interaction count per pose or mean distinct fingerprint features
+(receptor residue × interaction type) per pose. Zero-contact poses count in the
+mean. Ranking measures contact evidence, not binding affinity. Source and ligand
+identity distinguish compounds, including multiple compounds in one input file.
+
+The interface, figure annotations and export metadata disclose the ranking,
+selected count and any further pose/frame display reduction. Full result tables
+are preserved: **Export CSV/XLSX → All interactions** includes every analyzed
+ligand and pose, independently of the chart limit. Figure data describe only the
+displayed chart selection. Analytical pages prepare their figures on demand.
+
+Pose/frame barcode and similarity views show at most 100 observations, covering
+each selected ligand before filling remaining slots in source order. The barcode
+displays at most 40 fingerprint features; similarity uses all fingerprint
+features. Aggregate frequencies retain all observations of the selected ligands,
+including zero-contact poses. These display limits do not delete table data.
+
 ## Release 1.3.0
 
 DockLens 1.3 preserves source-native ligand and pose identity from MOL2 through
@@ -137,7 +162,7 @@ pyinstaller --noconfirm --onefile --windowed --name DockLens run_docklens.py
 To build the Windows installer locally, install Inno Setup 6 and run:
 
 ```
-  iscc /DAppVersion=1.3.0 /DSourceExe=dist\\DockLens.exe /DOutputDir=dist installer\\DockLens.iss
+  iscc /DAppVersion=1.4.0 /DSourceExe=dist\\DockLens.exe /DOutputDir=dist installer\\DockLens.iss
 ```
 
 ## DockingHub integration
@@ -279,8 +304,9 @@ global profile selector and are applied consistently to charts and tables.
    replicas or nonconsecutive saved frames, load the trajectory-map CSV for
    System A and, when comparing MD systems, for System B.
 8. Sort by clicking a column; filter by interaction type, search text, or
-   "key residues only". Edit key residues any time — counts recompute without
-   re-running detection.
+   "key residues only". Edit key residues, then press **Recalculate** once to
+   apply all changes without re-running detection. Pending changes must be
+   recalculated or discarded before saving or exporting results.
 9. Choose the desired **Export view** in Fingerprint, then use **Export
    figure** to write that figure, its source rows and reproducibility manifest.
 10. **Export CSV** or **Export XLSX**. Choose all interactions or the current
