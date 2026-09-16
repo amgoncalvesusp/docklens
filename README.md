@@ -10,12 +10,21 @@ frames (`.mol2`, `.pdb`, `.pdbqt`). DockLens separates receptor from ligand,
 preserves atom-level evidence and presents residue profiles, interaction
 fingerprints, comparisons and sortable/filterable tables.
 
-The legacy PLIP profile in `interaction_core.py` preserves historical results.
+The legacy PLIP profile in `interaction_core.py` retains historical cutoffs;
+shared correctness fixes also apply to this profile.
 Three additional scientific profiles are available: native LUNA 0.14 defaults,
 DSV-like criteria queried from Discovery Studio Visualizer 2024, and a
 conservative LUNA × DSV cross-profile. DockLens has **no PyMOL dependency**.
 
 **Inventor:** Adriano Marques Gonçalves — Universidade de Araraquara (UNIARA).
+
+## Release 1.4.1
+
+DockLens and PyMOL Non-Covalent Interactions 0.7.2 share the corrected detector:
+stable ring identities, protein aromatic-ring recognition for PDB inputs,
+single counting of protein ionic centres and complete chalcogen donor geometry.
+See the [reproducibility contract](normalizacao_interacoes_intermoleculares/reproducibility.md)
+for matching inputs, settings and the native validation scope.
 
 ## Release 1.4.0
 

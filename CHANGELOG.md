@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.4.1 — 2026-09-15
+
+### Fixed
+
+- Preserve protein aromatic-ring evidence for standard PDB residues, restoring
+  sulfur–pi and other strict aromatic contacts when SYBYL fields are absent.
+  Explicit non-aromatic typing still takes precedence.
+- Order rings, members and detected contacts consistently after internal atom
+  reindexing or source serial renumbering.
+- Count a charged protein functional group once instead of also counting the
+  formal charge on one of its atoms as a second ionic centre.
+- Evaluate all bonded directions for chalcogen donors instead of whichever
+  neighbor happened to be enumerated first.
+- Synchronize the reviewed detector with PyMOL Non-Covalent Interactions 0.7.2,
+  whose PDB fallback now excludes PyMOL-only inferred bond orders.
+
+### Reproducibility
+
+- Added regression tests for aromatic sulfur contacts, ionic group duplication,
+  atom reindexing and serial renumbering.
+- Native PyMOL comparisons use identical structures, chemistry profiles and
+  reporting scope. Converted chemistry, added hydrogens and different profiles
+  are different inputs and can legitimately change the results.
+- See `normalizacao_interacoes_intermoleculares/reproducibility.md` for the
+  compatibility contract and verification scope.
+
+### Validation
+
+- 330 tests passed with 83.84% branch-aware coverage; Ruff and runtime
+  dependency audit passed.
+- Native PyMOL 3.1.4.1: 20 profile/structure cases, 365 contacts matched;
+  repeated drawing/CSV exports and PSE save/reload remained identical.
+- DockLens: repeated runs and project save/reload/recalculation produced
+  byte-identical CSV exports in all four profiles for the five supplied poses.
+
 ## 1.4.0 — 2026-09-07
 
 ### Added
