@@ -288,6 +288,9 @@ global profile selector and are applied consistently to charts and tables.
 
 ## Using the app
 
+A step-by-step guide is in [docs/TUTORIAL.md](docs/TUTORIAL.md); hardware
+guidance is in [docs/SYSTEM_REQUIREMENTS.md](docs/SYSTEM_REQUIREMENTS.md).
+
 1. Choose **Protein + ligands** for one or more external receptor groups, or
    use **Open complex files** / **Open folder** for combined structures.
    Reopening the protein/ligand dialog appends files within each group.
